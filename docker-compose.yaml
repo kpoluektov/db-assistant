@@ -1,0 +1,50 @@
+version: '3.7'
+
+services: 
+  web:    
+    image: metadata_server:0.5
+    build: ./metadata_server
+    ports:     
+      - "8080:8080"   
+    networks:      
+      - mcp_network 
+    environment:
+      - MDATA_ADDR=web
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail http://web:8080/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s 
+    volumes:      
+      - /var/opt/root.crt:/app/root.crt:ro
+
+  mcp:   
+    image: mcp_server:0.5  
+    build: ./mcp_server
+    ports:
+      - "8081:8081"
+    networks:     
+      - mcp_network    
+    depends_on:
+      - web
+    env_file:
+      - .env
+    restart: on-failure
+
+  agent:
+    image: flask_agent:0.5
+    build: ./flask_agent
+    ports:
+      - "8083:8083"
+    networks:
+      - mcp_network
+    depends_on:
+      - mcp
+    restart: on-failure
+    volumes:
+      - .env.agent:/app/.env:ro
+networks:  
+  mcp_network:   
+    driver: bridge
