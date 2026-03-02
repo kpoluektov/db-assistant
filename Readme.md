@@ -20,12 +20,12 @@ MDATA_HOST=mysql-fqdn.mdb.yandexcloud.net
 MDATA_PORT=3306
 MDATA_USER=<user>
 MDATA_PASS=<password>
-MDATA_TYPE=mysql
+MDATA_TYPE=mysql # или postgresql #oracle
 MDATA_BASE=pol
 MCP_PORT=8081
 MSP_HOST=mcp
 SSE_MODE=true
-MDATA_CAPATH=/app/root.crt
+MDATA_CAPATH=/app/root.crt # если возможен только tls - только для случая с mysql
 ```
 - создать .env.agent 
 ```
@@ -46,3 +46,14 @@ YANDEX__PORT=8083
 ```
 docker-compose up -d
 ```
+
+Сценарий проверки для записи скринкаста
+
+-  помоги оптимизировать запрос 
+```sql
+select s1.c, count(1) from public.sbtest s1 join public.sbtest7 s7 using (id)  group by s1.c
+```
+
+- дай список полей public.my_table
+
+- предложи правила анонимизации таблицы для передачи в команду разработки
