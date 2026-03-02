@@ -1,8 +1,10 @@
 ## Metadata MCP server for Metadata rest service. 
 
-publishes two tools 
+publishes some tools 
 - get_statistics - maps to /stat/ metadata server path
 - get_metadata - maps to /metadata/ metadata server path 
+- get_indexes - 
+- get_db_parameters
 
 To build the image 
 ```sh
