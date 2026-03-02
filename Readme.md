@@ -6,6 +6,21 @@ Yandex AI Studio. Пример использования OpenAI Agents SDK дл
 ### DataMaskingAgent
 - выдает рекомендации по маскированию данных исходя из описания таблиц, которые ищет в контексте диалога (agents.SQLiteSession). Выдает их на основании файлов, загруженных в Yandex AI Studio vector_store
 
+
+Используемые сервисы Yandex Cloud
+
+- AI Studio (OpenAI Agents SDK использует Responses API)
+- Сервис может использовать (быть развернутым на) Yandex Cloud Compute instance (используется docker-compose)
+- В качестве анализируемой СУБД могут использоваться
+- - Yandex Cloud service for Managed PostgreSQL
+- - Yandex Cloud service for Managed MySQL
+- - те же СУБД (+ Oracle DB) развернутые самостоятельно, с сетевым доступом (от VM с docker-compose до СУБД)
+
+Сервис работы с СУБД не требует фактического доступа к данным, достаточно доступа к metadata (
+    - MySQL/PostgreSQL - information_schema
+    - Oracle - all_tables/all_indexes/all_tab_columns/all_indexes - на анализируемый объекты + v$parameter
+)
+
 Для работы нужно 
 - склонировать репозиторий
 - запустить сборку 
