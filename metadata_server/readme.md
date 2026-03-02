@@ -49,5 +49,5 @@ curl --cookie "session=K6eAvSYsRyLBdGyOhcekonXMSifovb0mRcdk0_5Stec" "http://127.
 
 ### close current db session
 ```sh
-curl  --cookie "session=K6eAvSYsRyLBdGyOhcekonXMSifovb0mRcdk0_5Stec" --request POST "http://84.252.143.105:8080/connection/close"
+curl  --cookie "session=K6eAvSYsRyLBdGyOhcekonXMSifovb0mRcdk0_5Stec" --request POST "http://127.0.0.1:8080/connection/close"
 ```

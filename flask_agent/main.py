@@ -31,7 +31,6 @@ def receive_message(data):
    thread = socketio.start_background_task(target=sync_wrapper_for_async, data=data, sid=request.sid)
 
 def sync_wrapper_for_async(data, sid):
-    """Wrapper to run the async function in its own event loop."""
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     loop.run_until_complete(get_response(data, sid))

@@ -3,7 +3,7 @@ import asyncio
 from contextlib import AsyncExitStack
 
 from agents.mcp import MCPServerSse
-from agents import AsyncOpenAI, Agent, Runner, RunConfig, ModelSettings, FileSearchTool, set_tracing_disabled, handoff, set_default_openai_client, SQLiteSession
+from agents import AsyncOpenAI, Agent, Runner, RunConfig, ModelSettings, FileSearchTool, handoff, SQLiteSession
 from utils.config import Settings
 from utils.logger import yLogger
 from utils.hooks import hooks
@@ -48,7 +48,6 @@ class YandexAssistant:
         self._metaAssistant = Agent(
             name="MetadataAgent",
             instructions=self.settings.yandex.METADATA_INSTRUCTION,
-            model="MCP",
             mcp_servers=[self._getMetadata],
         )
 
@@ -56,7 +55,6 @@ class YandexAssistant:
         self._maskingAssistant = Agent(
             name="DataMaskingAgent",
             instructions=self.settings.yandex.MASKING_INSTRUCTION,
-            model="RAG",
             tools=[
                 FileSearchTool(
                     max_num_results=5,
@@ -67,7 +65,6 @@ class YandexAssistant:
 	# parent agent
         self._assistant = Agent(
             name="AssistantAgent",
-            model=self.settings.yandex.MODEL,
             instructions=f"{RECOMMENDED_PROMPT_PREFIX}\n{self.settings.yandex.ASSISTANT_INSTRUCTION}",
             handoffs=[
                 handoff(
@@ -93,10 +90,10 @@ class YandexAssistant:
                 run_config = self._rc,
                 session = self._session
             )
-            output = response.final_output or "No response from assistent"
+            output = response.final_output or "No response from assistant"
 #            print(f"output AGENT: {output}")
             return output
         except Exception as e:
-            #print(f"Assistent got error: {e}")
+            #print(f"Assistant got error: {e}")
             return f"Error: {e}"
 
