@@ -41,7 +41,6 @@ MCP_PORT=8081
 MSP_HOST=mcp
 SSE_MODE=true
 MDATA_CAPATH=/app/root.crt # если возможен только tls - только для случая с mysql
-WAIT_TIMEOUT=45
 ```
 - создать .env.agent 
 ```
@@ -57,6 +56,7 @@ YANDEX__LOG_FILE_NAME=agent_main.log
 YANDEX__SECRET_KEY=my_very_secret_key
 YANDEX__MASKING_INDEX_ID=<vector_store_id>
 YANDEX__PORT=8083
+YANDEX__WAIT_TIMEOUT=45
 ```
 Запустить ассистента
 ```
