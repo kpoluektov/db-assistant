@@ -17,6 +17,7 @@ class YandexSettings(BaseModel):
     PORT: int
     MASKING_INSTRUCTION: str
     MASKING_INDEX_ID: str 
+    WAIT_TIMEOUT: int
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

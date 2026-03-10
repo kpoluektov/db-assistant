@@ -2,8 +2,8 @@
 # -*- encoding: utf-8 -*-
 
 import asyncio
-from flask import Flask, render_template, jsonify, request
-from flask_socketio import SocketIO, emit
+from flask import Flask, render_template, request
+from flask_socketio import SocketIO
 from utils.config import Settings
 from utils.logger import yLogger
 from agent import YandexAssistant
@@ -15,7 +15,6 @@ logger = yLogger()
 logger.initFile(settings.yandex.LOG_FILE_NAME)
 app.config['SECRET_KEY'] = settings.yandex.SECRET_KEY
 socketio = SocketIO(app, async_mode='eventlet')
-WAIT_TIMEOUT = 30
 
 @app.route('/')
 def index():
@@ -39,9 +38,9 @@ def sync_wrapper_for_async(data, sid):
 async def get_response(input, sid):
    async with YandexAssistant(settings, sid) as assistant:
      try:
-       resp = await asyncio.wait_for(assistant.one_shot(input.get('message')), timeout=WAIT_TIMEOUT)
+       resp = await asyncio.wait_for(assistant.one_shot(input.get('message')), timeout=settings.yandex.WAIT_TIMEOUT)
      except asyncio.TimeoutError:
-       resp = "Timeout occurred after waiting for " + WAIT_TIMEOUT + " seconds"
+       resp = "Timeout occurred after waiting for " + str(settings.yandex.WAIT_TIMEOUT) + " seconds"
    socketio.emit('server_message', {'nickname': 'assistant', 'message': resp})
 
 def send_update(data):
