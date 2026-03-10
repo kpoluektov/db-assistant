@@ -41,6 +41,7 @@ MCP_PORT=8081
 MSP_HOST=mcp
 SSE_MODE=true
 MDATA_CAPATH=/app/root.crt # если возможен только tls - только для случая с mysql
+WAIT_TIMEOUT=45
 ```
 - создать .env.agent 
 ```
