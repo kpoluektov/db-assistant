@@ -283,7 +283,7 @@ func makeWideRequest(path string, verb string, body io.Reader) (string, error) {
 	}
 	client := &http.Client{}
 	//log.Printf("wide get request with %s for sessionID %s", fmt.Sprintf(patt, values), sessID)
-	req, err := createRequest(verb, path, nil, sessID)
+	req, err := createRequest(verb, path, body, sessID)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("get page error: %w", err)
