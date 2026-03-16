@@ -271,11 +271,11 @@ func makeRequestOnTable(path string, request mcp.CallToolRequest) (string, error
 	return makeWideRequest(
 		fmt.Sprintf("%s/%s/%s/%s", metaURL, path, url.QueryEscape(schemaName), url.QueryEscape(tableName)),
 		GET_VERB,
-		request,
+		nil,
 	)
 }
 
-func makeWideRequest(path string, verb string, request mcp.CallToolRequest) (string, error) {
+func makeWideRequest(path string, verb string, body io.Reader) (string, error) {
 	//create connection
 	sessID, err := connectMetaServer()
 	if err != nil {
@@ -334,7 +334,7 @@ func getParameterHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp
 		return nil, errors.New("Parameter name must be a string")
 	}
 	resp, err :=
-		makeWideRequest(fmt.Sprintf("%s/%s/%s", metaURL, PARAMETER_PREFIX, url.QueryEscape(parameterName)), GET_VERB, request)
+		makeWideRequest(fmt.Sprintf("%s/%s/%s", metaURL, PARAMETER_PREFIX, url.QueryEscape(parameterName)), GET_VERB, nil)
 	if err != nil {
 		return nil, fmt.Errorf("get page error: %w", err)
 	}
@@ -342,7 +342,12 @@ func getParameterHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp
 }
 
 func getWideSQLHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	resp, err := makeWideRequest(fmt.Sprintf("%s", WIDE_SQL_PREFIX), "POST", request)
+
+	sql := request.GetArguments()[WIDE_SQL_PREFIX].(string)
+	data := url.Values{}
+	data.Set("sql", sql)
+	log.Printf("executing %s", sql)
+	resp, err := makeWideRequest(fmt.Sprintf("%s", WIDE_SQL_PREFIX), "POST", strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("post error: %w", err)
 	}
