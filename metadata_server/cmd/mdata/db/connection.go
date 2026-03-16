@@ -20,14 +20,16 @@ type DSN struct {
 }
 
 type Table struct {
-	Name    string    `json:"name"`
-	Columns *[]Column `json:"columns,omitempty"`
+	Name        string    `json:"name"`
+	Description string    `json:"description"`
+	Columns     *[]Column `json:"columns,omitempty"`
 }
 
 type Column struct {
-	Name   string    `json:"name"`
-	Type   string    `json:"type"`
-	Length nulls.Int `json:"length,omitempty"`
+	Name        string    `json:"name"`
+	Type        string    `json:"type"`
+	Description string    `json:"description"`
+	Length      nulls.Int `json:"length,omitempty"`
 }
 
 type Stats struct {
@@ -60,6 +62,7 @@ type Connector interface {
 	GetIndColumns() string
 	GetParameter() string
 	GetVersionSQL() string
+	GetRoCommand() string
 }
 
 func InitPool(dsn *DSN) (Connector, error) {
@@ -121,22 +124,23 @@ func (conn *Connection) GetTables(schema string, table string, size int, strict 
 	sqlStr := conn.connector.GetTables(table, strict)
 	//log.Printf("sqlStr is %s", sqlStr)
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table, size)
-	defer rows.Close()
 	if err != nil {
 		log.Printf("Query failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
-		var tName string
-		err = rows.Scan(&tName)
+		var tName, tDescription string
+		err = rows.Scan(&tName, &tDescription)
 		if err != nil {
 			break
 		}
 		if !strict {
-			tables = append(tables, Table{tName, nil})
+			tables = append(tables, Table{tName, tDescription, nil})
 		} else {
 			cols, _ := conn.getColumns(schema, table)
-			tables = append(tables, Table{tName, &cols})
+			tables = append(tables, Table{tName, tDescription, &cols})
 		}
 	}
 	if err != nil {
@@ -149,19 +153,20 @@ func (conn *Connection) getColumns(schema string, table string) ([]Column, error
 	columns := []Column{}
 	sqlStr := conn.connector.GetColumns()
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table)
-	defer rows.Close()
 	if err != nil {
 		log.Printf("Rows queuing failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
-		var cName, cType string
+		var cName, cType, tDescription string
 		var cLength nulls.Int
-		err = rows.Scan(&cName, &cType, &cLength)
+		err = rows.Scan(&cName, &cType, tDescription, &cLength)
 		if err != nil {
 			break
 		}
-		columns = append(columns, Column{cName, cType, cLength})
+		columns = append(columns, Column{cName, cType, tDescription, cLength})
 	}
 	if err != nil {
 		log.Printf("Rows quering failed: %v\n", err)
@@ -174,10 +179,10 @@ func (conn *Connection) GetStats(schema string, table string) (Stats, error) {
 	var lastAnalized nulls.Time
 	sqlStr := conn.connector.GetStats()
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table)
-	defer rows.Close()
 	if err != nil {
-		log.Printf("Stats queuing failed: %v\n", err)
+		return Stats{numRows, lastAnalized}, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		err = rows.Scan(&numRows, &lastAnalized)
@@ -194,10 +199,10 @@ func (conn *Connection) GetIndexes(schema string, table string) ([]Index, error)
 	sqlStr := conn.connector.GetIndexes()
 	//log.Printf("sqlStr is %s", sqlStr)
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table)
-	defer rows.Close()
 	if err != nil {
-		log.Printf("Query get_index failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var iName string
@@ -219,10 +224,10 @@ func (conn *Connection) getIndColumns(schema string, index string) ([]IndexColum
 	columns := []IndexColumn{}
 	sqlStr := conn.connector.GetIndColumns()
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, index)
-	defer rows.Close()
 	if err != nil {
-		log.Printf("Rows queuing failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var cName string
@@ -243,10 +248,10 @@ func (conn *Connection) GetParameter(pName string) ([]Parameter, error) {
 	params := []Parameter{}
 	sqlStr := conn.connector.GetParameter()
 	rows, err := conn.connector.GetPool().Query(sqlStr, pName)
-	defer rows.Close()
 	if err != nil {
-		log.Printf("Rows queuing failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var cName string
@@ -263,18 +268,53 @@ func (conn *Connection) GetParameter(pName string) ([]Parameter, error) {
 	return params, err
 }
 
+func (conn *Connection) GetWideResult(pSQL string) ([]map[string]any, error) {
+	rows, err := conn.connector.GetPool().Query(conn.connector.GetParameter() + pSQL)
+	if err != nil {
+		log.Printf("Rows queuing failed: %v\n", err)
+		return nil, err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var results []map[string]any
+	for rows.Next() {
+		values := make([]any, len(columns))
+		pointers := make([]any, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+
+		if err := rows.Scan(pointers...); err != nil {
+			return nil, err
+		}
+
+		m := make(map[string]any)
+		for i, colName := range columns {
+			m[colName] = values[i]
+		}
+		results = append(results, m)
+	}
+	if err = rows.Err(); err != nil {
+		log.Printf("Rows quering failed: %v\n", err)
+		return nil, err
+	}
+	return results, err
+
+}
+
 /* not a connection member */
 func GetVersion(connector Connector) string {
 	version := "not defined"
 	sqlStr := connector.GetVersionSQL()
 	rows, err := connector.GetPool().Query(sqlStr)
-	defer rows.Close()
 	if err != nil {
 		log.Printf("Version queuing failed: %v\n", err)
+		return version
 	}
-	if rows.Next() {
-		err = rows.Scan(&version)
-	}
+	defer rows.Close()
 	if err != nil {
 		log.Printf("Version quering failed: %v\n", err)
 	}

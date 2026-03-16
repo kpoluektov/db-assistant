@@ -26,8 +26,11 @@ func (conn PGConnector) GetPool() *sql.DB {
 }
 
 func (conn PGConnector) GetTables(table string, strict bool) string {
-	sqlStr := `select table_name from information_schema.tables 
-	where table_type = 'BASE TABLE' and table_schema = $1 and table_name %s order by table_name fetch first $3 rows only`
+	sqlStr := `select pc.relname, pd.description from pg_class pc 
+	join pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
+	left join pg_description pd on pd.objoid = pc.oid	 
+	where pc.relkind = 'r' and pn.nspname = $1 and and pd.objsubid = 0 
+	and pc.relname %s order by 1 fetch first $3 rows only`
 	if !strict && (strings.Contains(table, "%") || strings.Contains(table, "_")) {
 		sqlStr = fmt.Sprintf(sqlStr, "like $2")
 	} else {
@@ -37,9 +40,16 @@ func (conn PGConnector) GetTables(table string, strict bool) string {
 }
 
 func (conn PGConnector) GetColumns() string {
-	return `select column_name, data_type, character_maximum_length 
-						from information_schema.columns where table_schema = $1 
-						and table_name = $2 order by ordinal_position`
+	return `select a.attname AS column_name,
+    				format_type(a.atttypid, a.atttypmod) AS data_type,
+					null as data_length,
+    				col_description(a.attrelid, a.attnum) AS column_comment  
+					from pg_attribute a
+					join pg_namespace pn on pn.oid = c.relnamespace
+					join pg_class c on a.attrelid = c.oid
+					left join pg_catalog.pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum 
+					where pn.nspname = $1 and c.relname = $2 and a.attnum > 0 and not a.attisdropped
+					order by a.attnum`
 }
 
 func (conn PGConnector) GetStats() string {
@@ -71,4 +81,8 @@ func (conn PGConnector) GetParameter() string {
 
 func (conn PGConnector) GetVersionSQL() string {
 	return `select version()`
+}
+
+func (conn PGConnector) GetRoCommand() string {
+	return `set session characteristics as transaction read only;`
 }

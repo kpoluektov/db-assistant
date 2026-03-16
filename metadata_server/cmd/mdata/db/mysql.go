@@ -50,7 +50,7 @@ func (conn MySQLConnector) GetPool() *sql.DB {
 }
 
 func (conn MySQLConnector) GetTables(table string, strict bool) string {
-	sqlStr := `select table_name from information_schema.tables 
+	sqlStr := `select table_name, table_comment from information_schema.tables 
 	where table_type = 'BASE TABLE' and table_schema = ? and table_name %s order by table_name limit ?`
 	if !strict && (strings.Contains(table, "%") || strings.Contains(table, "_")) {
 		sqlStr = fmt.Sprintf(sqlStr, "like ?")
@@ -61,7 +61,7 @@ func (conn MySQLConnector) GetTables(table string, strict bool) string {
 }
 
 func (conn MySQLConnector) GetColumns() string {
-	return `select column_name, data_type, character_maximum_length 
+	return `select column_name, data_type, character_maximum_length, column_comment
 						from information_schema.columns where table_schema = ?
 						and table_name = ? order by ordinal_position`
 }
@@ -111,9 +111,13 @@ func createTLSConf(caPath string, clientCertPath string, clientKeyPath string) (
 }
 
 func (conn MySQLConnector) GetParameter() string {
-	return `SHOW VARIABLES WHERE Variable_name = ?`
+	return `show variables where variable_name = ?`
 }
 
 func (conn MySQLConnector) GetVersionSQL() string {
 	return `select version()`
+}
+
+func (conn MySQLConnector) GetRoCommand() string {
+	return `set session transaction read only;`
 }

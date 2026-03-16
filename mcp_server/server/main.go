@@ -39,6 +39,7 @@ const (
 	SCHEMA_NAME_STR    = "schemaName"
 	PARAMETER_PREFIX   = "parameter"
 	PARAMETER_NAME_STR = "parameterName"
+	WIDE_SQL_PREFIX    = "sql"
 
 	CONFIG_META_URL_STR    = "META_URL"
 	CONFIG_METADATA_HOST   = "MDATA_HOST"
@@ -50,6 +51,7 @@ const (
 	CONFIG_METADATA_CAPATH = "MDATA_CAPATH"
 	CONFIG_MCP_PORT        = "MCP_PORT"
 	CONFIG_MCP_HOST        = "MCP_HOST"
+	GET_VERB               = "GET"
 )
 
 var (
@@ -130,6 +132,13 @@ func main() {
 			mcp.Description("table name to retrieve indexes information for"),
 		),
 	)
+	wideSQLTool := mcp.NewTool("run_wide_sql",
+		mcp.WithDescription("Run wide SQL"),
+		mcp.WithString(WIDE_SQL_PREFIX,
+			mcp.Required(),
+			mcp.Description("SQL to execute"),
+		),
+	)
 
 	// Add tool handler
 	mcpServer.AddTool(statTool, getTableStatsHandler)
@@ -137,6 +146,7 @@ func main() {
 	mcpServer.AddTool(listTool, getTableListHandler)
 	mcpServer.AddTool(indexTool, getIndexesHandler)
 	mcpServer.AddTool(parameterTool, getParameterHandler)
+	mcpServer.AddTool(wideSQLTool, getWideSQLHandler)
 
 	// Start the stdio server
 	// Run server in appropriate mode
@@ -260,11 +270,12 @@ func makeRequestOnTable(path string, request mcp.CallToolRequest) (string, error
 	log.Printf("looking for %s for table %s in schema %s", path, tableName, schemaName)
 	return makeWideRequest(
 		fmt.Sprintf("%s/%s/%s/%s", metaURL, path, url.QueryEscape(schemaName), url.QueryEscape(tableName)),
+		GET_VERB,
 		request,
 	)
 }
 
-func makeWideRequest(path string, request mcp.CallToolRequest) (string, error) {
+func makeWideRequest(path string, verb string, request mcp.CallToolRequest) (string, error) {
 	//create connection
 	sessID, err := connectMetaServer()
 	if err != nil {
@@ -272,7 +283,7 @@ func makeWideRequest(path string, request mcp.CallToolRequest) (string, error) {
 	}
 	client := &http.Client{}
 	//log.Printf("wide get request with %s for sessionID %s", fmt.Sprintf(patt, values), sessID)
-	req, err := createRequest("GET", path, nil, sessID)
+	req, err := createRequest(verb, path, nil, sessID)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("get page error: %w", err)
@@ -322,9 +333,18 @@ func getParameterHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	if !ok {
 		return nil, errors.New("Parameter name must be a string")
 	}
-	resp, err := makeWideRequest(fmt.Sprintf("%s/%s/%s", metaURL, PARAMETER_PREFIX, url.QueryEscape(parameterName)), request)
+	resp, err :=
+		makeWideRequest(fmt.Sprintf("%s/%s/%s", metaURL, PARAMETER_PREFIX, url.QueryEscape(parameterName)), GET_VERB, request)
 	if err != nil {
 		return nil, fmt.Errorf("get page error: %w", err)
+	}
+	return mcp.NewToolResultText(resp), nil
+}
+
+func getWideSQLHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	resp, err := makeWideRequest(fmt.Sprintf("%s", WIDE_SQL_PREFIX), "POST", request)
+	if err != nil {
+		return nil, fmt.Errorf("post error: %w", err)
 	}
 	return mcp.NewToolResultText(resp), nil
 }

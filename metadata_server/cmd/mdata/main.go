@@ -28,6 +28,7 @@ const (
 	statsPrefix         = "/stats/"
 	indexPrefix         = "/indexes/"
 	parameterPrefix     = "/parameter/"
+	wideSQL             = "/sql"
 	parameterName       = "name"
 	defaultPort         = "8080"
 	defaultAddr         = "127.0.0.1"
@@ -90,6 +91,7 @@ func main() {
 	mux.Handle(fmt.Sprintf("%s{%s}/{%s}", statsPrefix, metaSchema, metaTable), universalHandler(statsPrefix)) // get statistics by table name
 	mux.Handle(fmt.Sprintf("%s{%s}/{%s}", indexPrefix, metaSchema, metaTable), universalHandler(indexPrefix)) // get indexes by table name
 	mux.Handle(fmt.Sprintf("%s{%s}", parameterPrefix, parameterName), universalHandler(parameterPrefix))      // get parameter value by name
+	mux.Handle(fmt.Sprintf("%s", wideSQL), universalHandler(parameterPrefix))                                 // run wide SQL
 
 	httpServer := &http.Server{
 		Handler: sessionManager.LoadAndSave(mux),
@@ -262,6 +264,13 @@ func universalHandler(goal string) http.Handler {
 			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
+		case "POST":
+			switch goal {
+			case wideSQL:
+				getWideResult(w, r)
+			default:
+				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			}
 		default:
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
@@ -343,6 +352,29 @@ func getParameter(w http.ResponseWriter, r *http.Request) {
 				res := make(map[string]any)
 				res["parameter"] = parameter
 				res["version"] = connection.CurVersion()
+				json.NewEncoder(w).Encode(res)
+			}
+		}
+	}
+}
+
+func getWideResult(w http.ResponseWriter, r *http.Request) {
+	connection, _ := connectionManager.GetConnection(sessionManager.GetString(r.Context(), SessionID))
+	err := connection.Check()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotAcceptable)
+	} else {
+		pSQL := r.Form.Get("SQL")
+		if len(parameterName) == 0 {
+			http.Error(w, "SQL not found", http.StatusBadRequest)
+		} else {
+			wideResult, err := connection.GetWideResult(pSQL)
+			if err != nil {
+				http.Error(w, "SQL exec error", http.StatusBadRequest)
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusAccepted)
+				res := wideResult
 				json.NewEncoder(w).Encode(res)
 			}
 		}
