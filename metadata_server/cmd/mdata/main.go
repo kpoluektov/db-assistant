@@ -91,7 +91,7 @@ func main() {
 	mux.Handle(fmt.Sprintf("%s{%s}/{%s}", statsPrefix, metaSchema, metaTable), universalHandler(statsPrefix)) // get statistics by table name
 	mux.Handle(fmt.Sprintf("%s{%s}/{%s}", indexPrefix, metaSchema, metaTable), universalHandler(indexPrefix)) // get indexes by table name
 	mux.Handle(fmt.Sprintf("%s{%s}", parameterPrefix, parameterName), universalHandler(parameterPrefix))      // get parameter value by name
-	mux.Handle(fmt.Sprintf("%s", wideSQL), universalHandler(parameterPrefix))                                 // run wide SQL
+	mux.Handle(fmt.Sprintf("%s", wideSQL), universalHandler(wideSQL))                                         // run wide SQL
 
 	httpServer := &http.Server{
 		Handler: sessionManager.LoadAndSave(mux),
@@ -364,8 +364,8 @@ func getWideResult(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusNotAcceptable)
 	} else {
-		pSQL := r.Form.Get("SQL")
-		if len(parameterName) == 0 {
+		pSQL := r.FormValue("sql")
+		if len(pSQL) == 0 {
 			http.Error(w, "SQL not found", http.StatusBadRequest)
 		} else {
 			wideResult, err := connection.GetWideResult(pSQL)

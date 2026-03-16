@@ -270,7 +270,8 @@ func (conn *Connection) GetParameter(pName string) ([]Parameter, error) {
 }
 
 func (conn *Connection) GetWideResult(pSQL string) ([]map[string]any, error) {
-	rows, err := conn.connector.GetPool().Query(conn.connector.GetParameter() + pSQL)
+	finalSQL := conn.connector.GetRoCommand() + pSQL
+	rows, err := conn.connector.GetPool().Query(finalSQL)
 	if err != nil {
 		log.Printf("Rows queuing failed: %v\n", err)
 		return nil, err
