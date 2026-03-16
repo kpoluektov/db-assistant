@@ -45,8 +45,8 @@ func (conn PGConnector) GetColumns() string {
 					null as data_length,
     				col_description(a.attrelid, a.attnum) AS column_comment  
 					from pg_attribute a
-					join pg_namespace pn on pn.oid = c.relnamespace
 					join pg_class c on a.attrelid = c.oid
+					join pg_namespace pn on pn.oid = c.relnamespace
 					left join pg_catalog.pg_description d on d.objoid = c.oid and d.objsubid = a.attnum 
 					where pn.nspname = $1 and c.relname = $2 and a.attnum > 0 and not a.attisdropped
 					order by a.attnum`
