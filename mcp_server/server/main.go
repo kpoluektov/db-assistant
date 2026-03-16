@@ -347,7 +347,7 @@ func getWideSQLHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.C
 	data := url.Values{}
 	data.Set("sql", sql)
 	log.Printf("executing %s", sql)
-	resp, err := makeWideRequest(fmt.Sprintf("%s", WIDE_SQL_PREFIX), "POST", strings.NewReader(data.Encode()))
+	resp, err := makeWideRequest(fmt.Sprintf("%s/%s", metaURL, WIDE_SQL_PREFIX), "POST", strings.NewReader(data.Encode()))
 	if err != nil {
 		return nil, fmt.Errorf("post error: %w", err)
 	}
