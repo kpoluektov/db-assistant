@@ -29,7 +29,7 @@ func (conn PGConnector) GetTables(table string, strict bool) string {
 	sqlStr := `select pc.relname, pd.description from pg_class pc 
 	join pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
 	left join pg_description pd on pd.objoid = pc.oid	 
-	where pc.relkind = 'r' and pn.nspname = $1 and and pd.objsubid = 0 
+	where pc.relkind = 'r' and pn.nspname = $1 and pd.objsubid = 0 
 	and pc.relname %s order by 1 fetch first $3 rows only`
 	if !strict && (strings.Contains(table, "%") || strings.Contains(table, "_")) {
 		sqlStr = fmt.Sprintf(sqlStr, "like $2")
@@ -47,7 +47,7 @@ func (conn PGConnector) GetColumns() string {
 					from pg_attribute a
 					join pg_namespace pn on pn.oid = c.relnamespace
 					join pg_class c on a.attrelid = c.oid
-					left join pg_catalog.pg_description d ON d.objoid = c.oid AND d.objsubid = a.attnum 
+					left join pg_catalog.pg_description d on d.objoid = c.oid and d.objsubid = a.attnum 
 					where pn.nspname = $1 and c.relname = $2 and a.attnum > 0 and not a.attisdropped
 					order by a.attnum`
 }
