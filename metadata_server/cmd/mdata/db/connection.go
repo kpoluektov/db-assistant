@@ -26,10 +26,10 @@ type Table struct {
 }
 
 type Column struct {
-	Name        string    `json:"name"`
-	Type        string    `json:"type"`
-	Length      nulls.Int `json:"length,omitempty"`
-	Description string    `json:"description"`
+	Name        string         `json:"name"`
+	Type        string         `json:"type"`
+	Length      nulls.Int      `json:"length,omitempty"`
+	Description sql.NullString `json:"description,omitempty"`
 }
 
 type Stats struct {
@@ -160,13 +160,14 @@ func (conn *Connection) getColumns(schema string, table string) ([]Column, error
 	defer rows.Close()
 
 	for rows.Next() {
-		var cName, cType, tDescription string
+		var cName, cType string
+		var сDescription sql.NullString
 		var cLength nulls.Int
-		err = rows.Scan(&cName, &cType, &cLength, &tDescription)
+		err = rows.Scan(&cName, &cType, &cLength, &сDescription)
 		if err != nil {
 			break
 		}
-		columns = append(columns, Column{cName, cType, cLength, tDescription})
+		columns = append(columns, Column{cName, cType, cLength, сDescription})
 	}
 	if err != nil {
 		log.Printf("Rows quering failed: %v\n", err)
