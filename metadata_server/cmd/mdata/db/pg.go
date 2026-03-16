@@ -42,7 +42,7 @@ func (conn PGConnector) GetTables(table string, strict bool) string {
 func (conn PGConnector) GetColumns() string {
 	return `select a.attname AS column_name,
     				format_type(a.atttypid, a.atttypmod) AS data_type,
-					null as data_length,
+					0 as data_length,
     				col_description(a.attrelid, a.attnum) AS column_comment  
 					from pg_attribute a
 					join pg_class c on a.attrelid = c.oid
