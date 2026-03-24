@@ -88,6 +88,7 @@ class YandexAssistant:
                 self._assistant,
                 message,
                 run_config = self._rc,
+                hooks=hooks, 
                 session = self._session
             )
             output = response.final_output or "No response from assistant"
