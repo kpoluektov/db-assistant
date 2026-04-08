@@ -45,6 +45,18 @@ services:
     restart: on-failure
     volumes:
       - .env.agent:/app/.env:ro
+#  agent:
+#    image: fastapi_agent:0.6
+#    build: ./fastapi_agent
+#    ports:
+#      - "8000:8000"
+#    networks:
+#      - mcp_network
+#    depends_on:
+#      - mcp
+#    restart: on-failure
+#    volumes:
+#      - .env.agent:/app/.env:ro
 networks:  
   mcp_network:   
     driver: bridge

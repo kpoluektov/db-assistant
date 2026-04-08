@@ -3,19 +3,18 @@ from agents.items import ModelResponse, TResponseInputItem
 from typing import Optional, Any
 import logging
 
-class ExampleHooks(RunHooks):
-    def __init__(self):
-        self.event_counter = 0
-        self.logger = logging.getLogger("openai.agents")
 
-    def _usage_to_str(self, usage: Usage) -> str:
-        return f"{usage.requests} requests, {usage.input_tokens} input tokens, {usage.output_tokens} output tokens, {usage.total_tokens} total tokens"
+class ExampleHooks(RunHooks):
+    def __init__(self, step_queue=None, sid=None):
+        self.logger = logging.getLogger("openai.agents")
+        self._step_queue = step_queue
+
+    def _emit(self, step_type: str, **kwargs):
+        if self._step_queue is not None:
+            self._step_queue.put({'type': step_type, **kwargs})
 
     async def on_agent_start(self, context: RunContextWrapper, agent: Agent) -> None:
-        self.event_counter += 1
-        self.logger.debug(
-            f"### {self.event_counter}: Agent {agent.name} started. Usage: {self._usage_to_str(context.usage)}"
-        )
+        self._emit('agent_start', agent=agent.name)
 
     async def on_llm_start(
         self,
@@ -24,41 +23,26 @@ class ExampleHooks(RunHooks):
         system_prompt: Optional[str],
         input_items: list[TResponseInputItem],
     ) -> None:
-        self.event_counter += 1
-        self.logger.debug(f"### {self.event_counter}: LLM started. with {input_items}.")
+        self._emit('llm_start', agent=agent.name)
 
     async def on_llm_end(
         self, context: RunContextWrapper, agent: Agent, response: ModelResponse
     ) -> None:
-        self.event_counter += 1
-        self.logger.debug(f"### {self.event_counter}: LLM ended.")
+        self._emit('llm_end', agent=agent.name)
 
     async def on_agent_end(self, context: RunContextWrapper, agent: Agent, output: Any) -> None:
-        self.event_counter += 1
-        self.logger.debug(
-            f"### {self.event_counter}: Agent {agent.name} ended with output {output}. Usage: {self._usage_to_str(context.usage)}"
-        )
+        self._emit('agent_end', agent=agent.name)
 
     async def on_tool_start(self, context: RunContextWrapper, agent: Agent, tool: Tool) -> None:
-        self.event_counter += 1
-        self.logger.debug(
-            f"### {self.event_counter}: Tool {tool.name} started. context is {context}"
-        )
+        self._emit('tool_start', tool=tool.name)
 
     async def on_tool_end(
         self, context: RunContextWrapper, agent: Agent, tool: Tool, result: str
     ) -> None:
-        self.event_counter += 1
-        self.logger.debug(
-            f"### {self.event_counter}: Tool {tool.name} ended with result {result}. "
-        )
+        self._emit('tool_end', tool=tool.name)
 
     async def on_handoff(
         self, context: RunContextWrapper, from_agent: Agent, to_agent: Agent
     ) -> None:
-        self.event_counter += 1
-        self.logger.debug(
-            f"### {self.event_counter}: Handoff from {from_agent.name} to {to_agent.name}. "
-        )
+        self._emit('handoff', from_agent=from_agent.name, to_agent=to_agent.name)
 
-hooks = ExampleHooks()

@@ -5,16 +5,14 @@ from contextlib import AsyncExitStack
 from agents.mcp import MCPServerSse
 from agents import AsyncOpenAI, Agent, Runner, RunConfig, ModelSettings, FileSearchTool, handoff, SQLiteSession
 from utils.config import Settings
-from utils.logger import yLogger
-from utils.hooks import hooks
 from utils.model_provider import CustomModelProvider
 from agents.extensions import handoff_filters
 from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
+
 class YandexAssistant:
-    def __init__(self, settings, sid):
+    def __init__(self, settings, sid, hooks=None):
         self.settings = settings
-	# create openAI client
         self._client = AsyncOpenAI(
             base_url=self.settings.yandex.URL,
             api_key=self.settings.yandex.AUTH,
@@ -24,34 +22,30 @@ class YandexAssistant:
             model_provider=CustomModelProvider(self.settings.yandex.MODEL, self._client),
         )
         self._exit_stack = AsyncExitStack()
-
+        self._hooks = hooks
+        self._session = SQLiteSession(session_id=sid, db_path="chat.db")
         self._getMetadata = None
-        self._instructions = None
         self._assistant = None
         self._metaAssistant = None
         self._maskingAssistant = None
-        self._session = SQLiteSession(session_id=sid, db_path="chat.db")
+
     async def __aenter__(self):
-        # register MCP server
         self._getMetadata = await self._exit_stack.enter_async_context(
             MCPServerSse(
                 name="GetMetadata",
                 params={
-                   "url": self.settings.yandex.GET_INFO_MCP_URL,
-                   "timeout": 60,
+                    "url": self.settings.yandex.GET_INFO_MCP_URL,
+                    "timeout": 60,
                 },
                 cache_tools_list=True,
-                client_session_timeout_seconds=30
+                client_session_timeout_seconds=30,
             )
         )
-        # first child agent
         self._metaAssistant = Agent(
             name="MetadataAgent",
             instructions=self.settings.yandex.METADATA_INSTRUCTION,
             mcp_servers=[self._getMetadata],
         )
-
-        # second child agent
         self._maskingAssistant = Agent(
             name="DataMaskingAgent",
             instructions=self.settings.yandex.MASKING_INSTRUCTION,
@@ -62,7 +56,6 @@ class YandexAssistant:
                 )
             ],
         )
-	# parent agent
         self._assistant = Agent(
             name="AssistantAgent",
             instructions=f"{RECOMMENDED_PROMPT_PREFIX}\n{self.settings.yandex.ASSISTANT_INSTRUCTION}",
@@ -72,10 +65,11 @@ class YandexAssistant:
                     input_filter=handoff_filters.remove_all_tools,
                 ),
                 handoff(
-                    agent=self._metaAssistant ,
+                    agent=self._metaAssistant,
                     input_filter=handoff_filters.remove_all_tools,
-                )],
-            model_settings=ModelSettings(tool_choice="auto", reasoning={"effort": "high"})
+                ),
+            ],
+            model_settings=ModelSettings(tool_choice="auto", reasoning={"effort": "high"}),
         )
         return self
 
@@ -87,13 +81,10 @@ class YandexAssistant:
             response = await Runner.run(
                 self._assistant,
                 message,
-                run_config = self._rc,
-                session = self._session
+                run_config=self._rc,
+                hooks=self._hooks,
+                session=self._session,
             )
-            output = response.final_output or "No response from assistant"
-#            print(f"output AGENT: {output}")
-            return output
+            return response.final_output or "No response from assistant"
         except Exception as e:
-            #print(f"Assistant got error: {e}")
             return f"Error: {e}"
-
