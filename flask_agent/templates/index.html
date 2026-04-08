@@ -1,73 +1,240 @@
 <!DOCTYPE html>
-<meta charset="utf-8">
+<html lang="ru">
 <head>
-<title>Agent UI</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="author" content="unknown">
-<script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.2.0/socket.io.js" integrity="sha256-yr4fRk/GU1ehYJPAs8P4JlTgu0Hdsp4ZKrx8bDEDC3I=" crossorigin="anonymous"></script>
-<link rel="stylesheet" type="text/css" href="{{ url_for('static', filename='./css/style.css') }}">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DB Assistant</title>
+  <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.2.0/socket.io.js"
+          integrity="sha256-yr4fRk/GU1ehYJPAs8P4JlTgu0Hdsp4ZKrx8bDEDC3I=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-<script type="text/javascript" charset="utf-8">
-const socket = io();
+  <div id="app">
+    <header id="header">
+      <div id="header-inner">
+        <svg id="logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="16" cy="9" rx="12" ry="5" stroke="currentColor" stroke-width="2"/>
+          <path d="M4 9v7c0 2.76 5.37 5 12 5s12-2.24 12-5V9" stroke="currentColor" stroke-width="2"/>
+          <path d="M4 16v7c0 2.76 5.37 5 12 5s12-2.24 12-5v-7" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <span id="header-title">DB Assistant</span>
+      </div>
+      <div id="status-dot" class="dot-connecting" title="Подключение..."></div>
+    </header>
 
-socket.on('connect', () => {
-	socket.emit('connected', {'nickname':'user'}, (data) => {
-	});
-});
+    <main id="messages"></main>
 
-socket.on('server_message', (data) => {
-	let e = document.createElement('p');
-	let sp = document.createElement('span');
-		sp.innerHTML = data.nickname;
-	e.appendChild(sp);
-	e.innerHTML = e.innerHTML+'>> '+data.message;
+    <footer id="input-area">
+      <textarea id="message-input" rows="1"
+                placeholder="Введите вопрос по базе данных…"
+                autocomplete="off"></textarea>
+      <button id="send-btn" disabled title="Отправить">
+        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </footer>
+  </div>
 
-	if(document.getElementById('message-box').children.length>20){
-		document.getElementById('message-box').removeChild(document.getElementById('message-box').children[0]);
-	}
+  <script>
+    // ── Marked config ───────────────────────────────────────────────
+    marked.setOptions({
+      highlight: (code, lang) => {
+        const language = hljs.getLanguage(lang) ? lang : 'sql';
+        return hljs.highlight(code, { language }).value;
+      },
+      breaks: true,
+      gfm: true,
+    });
 
-	document.getElementById('message-box').appendChild(e);
+    // ── DOM refs ────────────────────────────────────────────────────
+    const messages   = document.getElementById('messages');
+    const input      = document.getElementById('message-input');
+    const sendBtn    = document.getElementById('send-btn');
+    const statusDot  = document.getElementById('status-dot');
 
+    // ── State ───────────────────────────────────────────────────────
+    let waitingForReply = false;
+    let typingEl        = null;
 
-	document.getElementById('message-box').scroll(0, document.getElementById('message-box').scrollHeight);
-});
+    // ── Reasoning block ─────────────────────────────────────────────
+    let reasoningEl = null;
+    let reasoningSteps = 0;
 
-function htmlEntities(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+    const STEP_LABELS = {
+      agent_start: (d) => `Агент <b>${d.agent}</b> запущен`,
+      agent_end:   (d) => `Агент <b>${d.agent}</b> завершил работу`,
+      llm_start:   (d) => `<b>${d.agent}</b>: запрос к LLM…`,
+      llm_end:     (d) => `<b>${d.agent}</b>: ответ LLM получен`,
+      tool_start:  (d) => `Вызов инструмента <b>${d.tool}</b>…`,
+      tool_end:    (d) => `Инструмент <b>${d.tool}</b> вернул результат`,
+      handoff:     (d) => `Передача управления: <b>${d.from_agent}</b> → <b>${d.to_agent}</b>`,
+    };
 
-function sendMessage(){
-	socket.emit('client_message', {'nickname': 'user', 'message':  htmlEntities(document.getElementById('message-input').value)});
-	document.getElementById('message-input').value = '';
-}
+    const STEP_ICONS = {
+      agent_start: '🤖', agent_end: '✓',
+      llm_start:   '💭', llm_end:   '✓',
+      tool_start:  '⚙',  tool_end:  '✓',
+      handoff:     '→',
+    };
 
-function isPressingEnter(e){
-	let k;
-	if(window.event){
-		k = e.keyCode;
-		if(k===13){
-			sendMessage();
-		}
-	}else if(e.which){
-		k = e.which;
-		if(k===13){
-			sendMessage();
-		}
-	}
-}
+    function createReasoningBlock() {
+      reasoningEl = document.createElement('div');
+      reasoningEl.className = 'reasoning open';
+      reasoningEl.innerHTML =
+        `<div class="reasoning-header" onclick="toggleReasoning(this)">
+           <span class="reasoning-title">Рассуждения</span>
+           <span class="reasoning-count">0 шагов</span>
+           <span class="reasoning-chevron">▾</span>
+         </div>
+         <div class="reasoning-body"></div>`;
+      messages.appendChild(reasoningEl);
+      reasoningSteps = 0;
+      scrollToBottom();
+    }
 
-</script>
-<h1 id="title">AI Agent</h1>
-<section id="chat-box">
-	<section id="message-box">
-	</section>
+    function addReasoningStep(type, data) {
+      if (!reasoningEl) return;
+      const label = STEP_LABELS[type] ? STEP_LABELS[type](data) : type;
+      const icon  = STEP_ICONS[type] || '·';
+      const step  = document.createElement('div');
+      step.className = 'reasoning-step step-' + type;
+      step.innerHTML = `<span class="step-icon">${icon}</span><span class="step-text">${label}</span>`;
+      reasoningEl.querySelector('.reasoning-body').appendChild(step);
+      reasoningSteps++;
+      reasoningEl.querySelector('.reasoning-count').textContent = reasoningSteps + ' ' + plural(reasoningSteps, 'шаг', 'шага', 'шагов');
+      scrollToBottom();
+    }
 
-	<section id="input-box">
-		<input type="text" autofocus onkeypress="return isPressingEnter(event)" required placeholder="Enter your question here" id="message-input">
-		<button type="button" id="send-button" onclick="sendMessage()" >>></button>
-	</section>
-</section>
+    function collapseReasoning() {
+      if (!reasoningEl) return;
+      reasoningEl.classList.remove('open');
+      reasoningEl = null;
+    }
 
+    function toggleReasoning(header) {
+      header.closest('.reasoning').classList.toggle('open');
+    }
+
+    function plural(n, one, few, many) {
+      const mod10 = n % 10, mod100 = n % 100;
+      if (mod10 === 1 && mod100 !== 11) return one;
+      if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+      return many;
+    }
+
+    // ── Socket ──────────────────────────────────────────────────────
+    const socket = io();
+
+    socket.on('connect', () => {
+      socket.emit('connected', { nickname: 'user' });
+      setStatus('connected');
+      sendBtn.disabled = false;
+    });
+
+    socket.on('disconnect', () => {
+      setStatus('disconnected');
+      sendBtn.disabled = true;
+    });
+
+    socket.on('agent_step', (data) => {
+      if (!reasoningEl) createReasoningBlock();
+      addReasoningStep(data.type, data);
+    });
+
+    socket.on('server_message', (data) => {
+      removeTyping();
+      if (data.nickname === 'assistant') {
+        collapseReasoning();
+        appendMessage('assistant', data.message);
+        waitingForReply = false;
+        sendBtn.disabled = false;
+        input.disabled   = false;
+        input.focus();
+      }
+      // user echo — already shown optimistically, skip
+    });
+
+    // ── Helpers ─────────────────────────────────────────────────────
+    function setStatus(state) {
+      statusDot.className = 'dot-' + state;
+      statusDot.title = { connected: 'Подключено', disconnected: 'Нет связи', connecting: 'Подключение…' }[state] || '';
+    }
+
+    function appendMessage(role, raw) {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg msg-' + role;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      if (role === 'assistant') {
+        bubble.innerHTML = marked.parse(raw || '');
+        // re-highlight any code blocks that marked didn't catch
+        bubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+      } else {
+        bubble.textContent = raw;
+      }
+
+      wrap.appendChild(bubble);
+      messages.appendChild(wrap);
+      scrollToBottom();
+    }
+
+    function showTyping() {
+      if (typingEl) return;
+      typingEl = document.createElement('div');
+      typingEl.className = 'msg msg-assistant';
+      typingEl.innerHTML = '<div class="bubble typing"><span></span><span></span><span></span></div>';
+      messages.appendChild(typingEl);
+      scrollToBottom();
+    }
+
+    function removeTyping() {
+      if (typingEl) { typingEl.remove(); typingEl = null; }
+    }
+
+    function scrollToBottom() {
+      messages.scrollTop = messages.scrollHeight;
+    }
+
+    function sendMessage() {
+      const text = input.value.trim();
+      if (!text || waitingForReply) return;
+
+      reasoningEl = null;
+      appendMessage('user', text);
+      socket.emit('client_message', { nickname: 'user', message: text });
+
+      input.value     = '';
+      input.style.height = '';
+      waitingForReply = true;
+      sendBtn.disabled = true;
+      input.disabled   = true;
+      showTyping();
+    }
+
+    // ── Event listeners ─────────────────────────────────────────────
+    sendBtn.addEventListener('click', sendMessage);
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    // auto-grow textarea
+    input.addEventListener('input', () => {
+      input.style.height = '';
+      input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+    });
+  </script>
 </body>
 </html>
