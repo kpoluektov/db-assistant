@@ -21,7 +21,7 @@ type DSN struct {
 
 type Table struct {
 	Name        string    `json:"name"`
-	Description string    `json:"description"`
+	Description string    `json:"description,omitempty"`
 	Columns     *[]Column `json:"columns,omitempty"`
 }
 
