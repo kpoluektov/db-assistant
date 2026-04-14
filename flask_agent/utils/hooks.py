@@ -45,4 +45,3 @@ class ExampleHooks(RunHooks):
         self, context: RunContextWrapper, from_agent: Agent, to_agent: Agent
     ) -> None:
         self._emit('handoff', from_agent=from_agent.name, to_agent=to_agent.name)
-

@@ -81,9 +81,9 @@ class YandexAssistant:
             response = await Runner.run(
                 self._assistant,
                 message,
-                run_config = self._rc,
-                hooks=hooks,
-                session = self._session
+                run_config=self._rc,
+                hooks=self._hooks,
+                session=self._session,
             )
             return response.final_output or "No response from assistant"
         except Exception as e:
