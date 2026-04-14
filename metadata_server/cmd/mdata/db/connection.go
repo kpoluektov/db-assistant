@@ -20,9 +20,9 @@ type DSN struct {
 }
 
 type Table struct {
-	Name        string    `json:"name"`
-	Description string    `json:"description,omitempty"`
-	Columns     *[]Column `json:"columns,omitempty"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description,omitempty"`
+	Columns     *[]Column      `json:"columns,omitempty"`
 }
 
 type Column struct {
@@ -131,7 +131,8 @@ func (conn *Connection) GetTables(schema string, table string, size int, strict 
 	defer rows.Close()
 
 	for rows.Next() {
-		var tName, tDescription string
+		var tName string
+		var tDescription sql.NullString
 		err = rows.Scan(&tName, &tDescription)
 		if err != nil {
 			break
