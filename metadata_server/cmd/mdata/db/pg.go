@@ -28,8 +28,8 @@ func (conn PGConnector) GetPool() *sql.DB {
 func (conn PGConnector) GetTables(table string, strict bool) string {
 	sqlStr := `select pc.relname, pd.description from pg_class pc 
 	join pg_catalog.pg_namespace pn ON pn.oid = pc.relnamespace
-	left join pg_description pd on pd.objoid = pc.oid	 
-	where pc.relkind = 'r' and pn.nspname = $1 and pd.objsubid = 0 
+	left join pg_description pd on pd.objoid = pc.oid and pd.objsubid = 0 
+	where pc.relkind = 'r' and pn.nspname = $1
 	and pc.relname %s order by 1 fetch first $3 rows only`
 	if !strict && (strings.Contains(table, "%") || strings.Contains(table, "_")) {
 		sqlStr = fmt.Sprintf(sqlStr, "like $2")
