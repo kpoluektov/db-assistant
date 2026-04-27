@@ -121,3 +121,16 @@ func (conn MySQLConnector) GetVersionSQL() string {
 func (conn MySQLConnector) GetRoCommand() string {
 	return `set session transaction read only;`
 }
+
+func (conn MySQLConnector) GetForeignKeys() string {
+	return `SELECT kcu.constraint_name,
+		kcu.table_schema AS from_schema, kcu.table_name AS from_table, kcu.column_name AS from_column,
+		kcu.referenced_table_schema AS to_schema, kcu.referenced_table_name AS to_table, kcu.referenced_column_name AS to_column
+	FROM information_schema.key_column_usage AS kcu
+	JOIN information_schema.table_constraints AS tc
+		ON tc.constraint_name = kcu.constraint_name
+		AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name
+	WHERE tc.constraint_type = 'FOREIGN KEY'
+	AND kcu.referenced_table_name IS NOT NULL
+	AND ((kcu.table_schema = ? AND kcu.table_name = ?) OR (kcu.referenced_table_schema = ? AND kcu.referenced_table_name = ?))`
+}

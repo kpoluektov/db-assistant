@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/lefinal/nulls"
@@ -53,6 +54,30 @@ type Parameter struct {
 	Value string `json:"value"`
 }
 
+type ForeignKey struct {
+	ConstraintName string `json:"constraint_name"`
+	FromSchema     string `json:"from_schema"`
+	FromTable      string `json:"from_table"`
+	FromColumn     string `json:"from_column"`
+	ToSchema       string `json:"to_schema"`
+	ToTable        string `json:"to_table"`
+	ToColumn       string `json:"to_column"`
+}
+
+type RelationEdge struct {
+	ConstraintName string        `json:"constraint_name"`
+	FromColumn     string        `json:"from_column"`
+	ToColumn       string        `json:"to_column"`
+	Direction      string        `json:"direction"`
+	Node           *RelationNode `json:"node"`
+}
+
+type RelationNode struct {
+	Schema    string          `json:"schema"`
+	Table     string          `json:"table"`
+	Relations []*RelationEdge `json:"relations,omitempty"`
+}
+
 type Connector interface {
 	GetPool() *sql.DB
 	GetTables(table string, strict bool) string
@@ -63,6 +88,7 @@ type Connector interface {
 	GetParameter() string
 	GetVersionSQL() string
 	GetRoCommand() string
+	GetForeignKeys() string
 }
 
 func InitPool(dsn *DSN) (Connector, error) {
@@ -306,6 +332,89 @@ func (conn *Connection) GetWideResult(pSQL string) ([]map[string]any, error) {
 	}
 	return results, err
 
+}
+
+func (conn *Connection) fetchForeignKeys(schema, table string) ([]ForeignKey, error) {
+	fks := []ForeignKey{}
+	sqlStr := conn.connector.GetForeignKeys()
+	if sqlStr == "" {
+		return fks, nil
+	}
+	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table, schema, table)
+	if err != nil {
+		log.Printf("Foreign keys query failed: %v\n", err)
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var fk ForeignKey
+		err = rows.Scan(&fk.ConstraintName, &fk.FromSchema, &fk.FromTable, &fk.FromColumn,
+			&fk.ToSchema, &fk.ToTable, &fk.ToColumn)
+		if err != nil {
+			break
+		}
+		fks = append(fks, fk)
+	}
+	if err != nil {
+		log.Printf("Foreign keys scanning failed: %v\n", err)
+	}
+	return fks, err
+}
+
+func (conn *Connection) GetRelationTree(schema, table string, maxDepth int) (*RelationNode, error) {
+	if maxDepth > 5 {
+		maxDepth = 5
+	}
+	visited := map[string]bool{strings.ToLower(schema) + "." + strings.ToLower(table): true}
+	root := &RelationNode{Schema: schema, Table: table}
+
+	type queueItem struct {
+		node  *RelationNode
+		depth int
+	}
+	queue := []queueItem{{node: root, depth: 0}}
+
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+		if item.depth >= maxDepth {
+			continue
+		}
+
+		fks, err := conn.fetchForeignKeys(item.node.Schema, item.node.Table)
+		if err != nil {
+			return nil, err
+		}
+
+		for _, fk := range fks {
+			var childSchema, childTable, direction string
+			if strings.EqualFold(fk.FromSchema, item.node.Schema) && strings.EqualFold(fk.FromTable, item.node.Table) {
+				childSchema, childTable = fk.ToSchema, fk.ToTable
+				direction = "outgoing"
+			} else {
+				childSchema, childTable = fk.FromSchema, fk.FromTable
+				direction = "incoming"
+			}
+
+			childKey := strings.ToLower(childSchema) + "." + strings.ToLower(childTable)
+			if visited[childKey] {
+				continue
+			}
+			visited[childKey] = true
+
+			childNode := &RelationNode{Schema: childSchema, Table: childTable}
+			item.node.Relations = append(item.node.Relations, &RelationEdge{
+				ConstraintName: fk.ConstraintName,
+				FromColumn:     fk.FromColumn,
+				ToColumn:       fk.ToColumn,
+				Direction:      direction,
+				Node:           childNode,
+			})
+			queue = append(queue, queueItem{node: childNode, depth: item.depth + 1})
+		}
+	}
+
+	return root, nil
 }
 
 /* not a connection member */

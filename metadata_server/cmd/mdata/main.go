@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 
 	"syscall"
 	"time"
@@ -28,6 +29,7 @@ const (
 	statsPrefix         = "/stats/"
 	indexPrefix         = "/indexes/"
 	parameterPrefix     = "/parameter/"
+	relationsPrefix     = "/relationships/"
 	wideSQL             = "/sql"
 	parameterName       = "name"
 	defaultPort         = "8080"
@@ -90,8 +92,9 @@ func main() {
 	mux.Handle(fmt.Sprintf("%s{%s}", connectionPrefix, connectionOperation), connectHandler())                // connect/disconnect
 	mux.Handle(fmt.Sprintf("%s{%s}/{%s}", statsPrefix, metaSchema, metaTable), universalHandler(statsPrefix)) // get statistics by table name
 	mux.Handle(fmt.Sprintf("%s{%s}/{%s}", indexPrefix, metaSchema, metaTable), universalHandler(indexPrefix)) // get indexes by table name
-	mux.Handle(fmt.Sprintf("%s{%s}", parameterPrefix, parameterName), universalHandler(parameterPrefix))      // get parameter value by name
-	mux.Handle(fmt.Sprintf("%s", wideSQL), universalHandler(wideSQL))                                         // run wide SQL
+	mux.Handle(fmt.Sprintf("%s{%s}", parameterPrefix, parameterName), universalHandler(parameterPrefix))                        // get parameter value by name
+	mux.Handle(fmt.Sprintf("%s{%s}/{%s}", relationsPrefix, metaSchema, metaTable), universalHandler(relationsPrefix)) // get FK relation tree
+	mux.Handle(fmt.Sprintf("%s", wideSQL), universalHandler(wideSQL))                                                              // run wide SQL
 
 	httpServer := &http.Server{
 		Handler: sessionManager.LoadAndSave(mux),
@@ -261,6 +264,8 @@ func universalHandler(goal string) http.Handler {
 				getIndexes(w, r)
 			case parameterPrefix:
 				getParameter(w, r)
+			case relationsPrefix:
+				getRelations(w, r)
 			default:
 				http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			}
@@ -356,6 +361,41 @@ func getParameter(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+}
+
+func getRelations(w http.ResponseWriter, r *http.Request) {
+	connection, _ := connectionManager.GetConnection(sessionManager.GetString(r.Context(), SessionID))
+	err := connection.Check()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotAcceptable)
+		return
+	}
+	schemaName := r.PathValue(metaSchema)
+	tableName := r.PathValue(metaTable)
+	if len(schemaName) == 0 || len(tableName) == 0 {
+		http.Error(w, "Wrong path", http.StatusBadRequest)
+		return
+	}
+	depth := 5
+	if d := r.URL.Query().Get("depth"); len(d) > 0 {
+		if n, err := strconv.Atoi(d); err == nil && n > 0 && n <= 5 {
+			depth = n
+		}
+	}
+	tree, err := connection.GetRelationTree(schemaName, tableName, depth)
+	if err != nil {
+		http.Error(w, "Error building relation tree", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	res := map[string]any{
+		"schema":  schemaName,
+		"table":   tableName,
+		"tree":    tree,
+		"version": connection.CurVersion(),
+	}
+	json.NewEncoder(w).Encode(res)
 }
 
 func getWideResult(w http.ResponseWriter, r *http.Request) {

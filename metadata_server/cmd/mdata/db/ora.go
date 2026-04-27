@@ -75,3 +75,16 @@ func (conn OraConnector) GetVersionSQL() string {
 func (conn OraConnector) GetRoCommand() string {
 	return `set transaction read only;`
 }
+
+func (conn OraConnector) GetForeignKeys() string {
+	return `SELECT c.constraint_name,
+		c.owner AS from_schema, c.table_name AS from_table, cc.column_name AS from_column,
+		r.owner AS to_schema, r.table_name AS to_table, rc.column_name AS to_column
+	FROM all_constraints c
+	JOIN all_cons_columns cc ON cc.constraint_name = c.constraint_name AND cc.owner = c.owner
+	JOIN all_constraints r ON r.constraint_name = c.r_constraint_name AND r.owner = c.r_owner
+	JOIN all_cons_columns rc ON rc.constraint_name = r.constraint_name AND rc.owner = r.owner
+		AND rc.position = cc.position
+	WHERE c.constraint_type = 'R'
+	AND ((c.owner = upper(:1) AND c.table_name = upper(:2)) OR (r.owner = upper(:3) AND r.table_name = upper(:4)))`
+}
