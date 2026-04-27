@@ -155,6 +155,7 @@ class YandexAssistant:
                 run_config=self._rc,
                 hooks=self._hooks,
                 session=self._session,
+                max_turns=25,
             )
             return response.final_output or "No response from assistant"
         except Exception as e:
