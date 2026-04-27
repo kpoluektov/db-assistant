@@ -163,6 +163,7 @@ class YandexAssistant:
                 session=self._session,
                 max_turns=25,
             )
-            return response.final_output or "No response from assistant"
+            #return response.final_output or "No response from assistant"
+            return response
         except Exception as e:
             return f"Error: {e}"
