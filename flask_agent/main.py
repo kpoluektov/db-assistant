@@ -11,7 +11,7 @@ from flask_socketio import SocketIO
 from utils.config import Settings
 from utils.logger import yLogger
 from utils.hooks import ExampleHooks
-from agent import YandexAssistant
+from agent import YandexAssistant, initialize_schema
 import eventlet
 import eventlet.tpool
 
@@ -93,5 +93,19 @@ async def _get_agent_response(data, sid, step_queue):
         resp = f"Error: {e}"
     return resp
 
+def _run_init_in_thread():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(initialize_schema(settings))
+    except Exception as e:
+        _log.error(f"Schema initialization failed: {e}")
+    finally:
+        loop.close()
+
 if __name__ == "__main__":
+    import threading
+    t = threading.Thread(target=_run_init_in_thread, daemon=False)
+    t.start()
+    t.join()
     socketio.run(app, host='0.0.0.0', port=settings.yandex.PORT, debug=True)

@@ -16,8 +16,9 @@ class YandexSettings(BaseModel):
     SECRET_KEY: str
     PORT: int
     MASKING_INSTRUCTION: str
-    MASKING_INDEX_ID: str 
+    MASKING_INDEX_ID: str
     WAIT_TIMEOUT: int
+    METADATA_SCHEMA: str = "public"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
