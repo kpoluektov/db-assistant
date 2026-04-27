@@ -89,34 +89,31 @@ fk_edges AS (
         AND rc.position = cc.position
     WHERE c.constraint_type = 'R'
 ),
+dirs(dir) AS (SELECT 'outgoing' FROM dual UNION ALL SELECT 'incoming' FROM dual),
 fk_tree(parent_schema, parent_table, child_schema, child_table, constraint_name, from_col, to_col, direction, depth, path) AS (
-    SELECT p.p_schema, p.p_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
-           'outgoing', 1,
-           '|'||p.p_schema||'.'||p.p_table||'|'||e.to_schema||'.'||e.to_table||'|'
-    FROM params p, fk_edges e
-    WHERE e.from_schema = p.p_schema AND e.from_table = p.p_table
+    SELECT p.p_schema, p.p_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, 1,
+           '|'||p.p_schema||'.'||p.p_table||'|'||
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema||'.'||e.to_table
+                      ELSE e.from_schema||'.'||e.from_table END||'|'
+    FROM params p, fk_edges e, dirs d
+    WHERE (d.dir = 'outgoing' AND e.from_schema = p.p_schema AND e.from_table = p.p_table)
+       OR (d.dir = 'incoming' AND e.to_schema   = p.p_schema AND e.to_table   = p.p_table)
     UNION ALL
-    SELECT p.p_schema, p.p_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
-           'incoming', 1,
-           '|'||p.p_schema||'.'||p.p_table||'|'||e.from_schema||'.'||e.from_table||'|'
-    FROM params p, fk_edges e
-    WHERE e.to_schema = p.p_schema AND e.to_table = p.p_table
-    UNION ALL
-    SELECT t.child_schema, t.child_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
-           'outgoing', t.depth + 1,
-           t.path||e.to_schema||'.'||e.to_table||'|'
-    FROM fk_tree t, params p, fk_edges e
-    WHERE e.from_schema = t.child_schema AND e.from_table = t.child_table
-    AND t.depth < p.p_depth
-    AND INSTR(t.path, '|'||e.to_schema||'.'||e.to_table||'|') = 0
-    UNION ALL
-    SELECT t.child_schema, t.child_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
-           'incoming', t.depth + 1,
-           t.path||e.from_schema||'.'||e.from_table||'|'
-    FROM fk_tree t, params p, fk_edges e
-    WHERE e.to_schema = t.child_schema AND e.to_table = t.child_table
-    AND t.depth < p.p_depth
-    AND INSTR(t.path, '|'||e.from_schema||'.'||e.from_table||'|') = 0
+    SELECT t.child_schema, t.child_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, t.depth + 1,
+           t.path||CASE d.dir WHEN 'outgoing' THEN e.to_schema||'.'||e.to_table
+                              ELSE e.from_schema||'.'||e.from_table END||'|'
+    FROM fk_tree t, params p, fk_edges e, dirs d
+    WHERE t.depth < p.p_depth
+    AND ((d.dir = 'outgoing' AND e.from_schema = t.child_schema AND e.from_table = t.child_table
+          AND INSTR(t.path, '|'||e.to_schema||'.'||e.to_table||'|')     = 0)
+      OR (d.dir = 'incoming' AND e.to_schema   = t.child_schema AND e.to_table   = t.child_table
+          AND INSTR(t.path, '|'||e.from_schema||'.'||e.from_table||'|') = 0))
 )
 SELECT parent_schema, parent_table, child_schema, child_table, constraint_name, from_col, to_col, direction, depth
 FROM fk_tree ORDER BY depth`

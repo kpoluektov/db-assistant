@@ -88,10 +88,12 @@ func (conn PGConnector) GetRoCommand() string {
 }
 
 func (conn PGConnector) GetRelationTreeSQL() string {
+	// A recursive CTE in PostgreSQL must have exactly ONE top-level UNION ALL separating the
+	// non-recursive anchor from the recursive term (left-associative parsing would otherwise put
+	// one of the recursive branches inside the anchor). Both directions (outgoing/incoming) are
+	// handled via a CROSS JOIN with a two-row direction selector so the whole CTE stays binary.
 	return `WITH RECURSIVE
-params(p_schema, p_table, p_depth) AS (
-    VALUES ($1::text, $2::text, $3::int)
-),
+params(p_schema, p_table, p_depth) AS (VALUES ($1::text, $2::text, $3::int)),
 fk_edges AS (
     SELECT tc.table_schema AS from_schema, tc.table_name AS from_table, kcu.column_name AS from_col,
            ccu.table_schema AS to_schema, ccu.table_name AS to_table, ccu.column_name AS to_col,
@@ -103,34 +105,31 @@ fk_edges AS (
         ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
     WHERE tc.constraint_type = 'FOREIGN KEY'
 ),
+dirs(dir) AS (VALUES ('outgoing'::text), ('incoming'::text)),
 fk_tree(parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth, path) AS (
-    SELECT p.p_schema, p.p_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
-           'outgoing'::text, 1,
-           ARRAY[p.p_schema||'.'||p.p_table, e.to_schema||'.'||e.to_table]
-    FROM params p, fk_edges e
-    WHERE e.from_schema = p.p_schema AND e.from_table = p.p_table
+    SELECT p.p_schema, p.p_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, 1,
+           ARRAY[p.p_schema||'.'||p.p_table,
+                 CASE d.dir WHEN 'outgoing' THEN e.to_schema||'.'||e.to_table
+                            ELSE e.from_schema||'.'||e.from_table END]
+    FROM params p, fk_edges e, dirs d
+    WHERE (d.dir = 'outgoing' AND e.from_schema = p.p_schema AND e.from_table = p.p_table)
+       OR (d.dir = 'incoming' AND e.to_schema   = p.p_schema AND e.to_table   = p.p_table)
     UNION ALL
-    SELECT p.p_schema, p.p_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
-           'incoming'::text, 1,
-           ARRAY[p.p_schema||'.'||p.p_table, e.from_schema||'.'||e.from_table]
-    FROM params p, fk_edges e
-    WHERE e.to_schema = p.p_schema AND e.to_table = p.p_table
-    UNION ALL
-    SELECT t.child_schema, t.child_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
-           'outgoing'::text, t.depth + 1,
-           t.path || (e.to_schema||'.'||e.to_table)
-    FROM fk_tree t, params p, fk_edges e
-    WHERE e.from_schema = t.child_schema AND e.from_table = t.child_table
-    AND t.depth < p.p_depth
-    AND NOT (e.to_schema||'.'||e.to_table) = ANY(t.path)
-    UNION ALL
-    SELECT t.child_schema, t.child_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
-           'incoming'::text, t.depth + 1,
-           t.path || (e.from_schema||'.'||e.from_table)
-    FROM fk_tree t, params p, fk_edges e
-    WHERE e.to_schema = t.child_schema AND e.to_table = t.child_table
-    AND t.depth < p.p_depth
-    AND NOT (e.from_schema||'.'||e.from_table) = ANY(t.path)
+    SELECT t.child_schema, t.child_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, t.depth + 1,
+           t.path || CASE d.dir WHEN 'outgoing' THEN e.to_schema||'.'||e.to_table
+                                ELSE e.from_schema||'.'||e.from_table END
+    FROM fk_tree t, params p, fk_edges e, dirs d
+    WHERE t.depth < p.p_depth
+    AND ((d.dir = 'outgoing' AND e.from_schema = t.child_schema AND e.from_table = t.child_table
+          AND NOT (e.to_schema||'.'||e.to_table)     = ANY(t.path))
+      OR (d.dir = 'incoming' AND e.to_schema   = t.child_schema AND e.to_table   = t.child_table
+          AND NOT (e.from_schema||'.'||e.from_table) = ANY(t.path)))
 )
 SELECT parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth
 FROM fk_tree ORDER BY depth`

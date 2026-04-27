@@ -135,34 +135,32 @@ fk_edges AS (
         AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name
     WHERE tc.constraint_type = 'FOREIGN KEY' AND kcu.referenced_table_name IS NOT NULL
 ),
+dirs AS (SELECT 'outgoing' AS dir UNION ALL SELECT 'incoming'),
 fk_tree(parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth, path) AS (
-    SELECT p.p_schema, p.p_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
-           'outgoing', 1,
-           CONCAT('|', p.p_schema, '.', p.p_table, '|', e.to_schema, '.', e.to_table, '|')
-    FROM params p, fk_edges e
-    WHERE e.from_schema = p.p_schema AND e.from_table = p.p_table
+    SELECT p.p_schema, p.p_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, 1,
+           CONCAT('|', p.p_schema, '.', p.p_table, '|',
+                  CASE d.dir WHEN 'outgoing' THEN CONCAT(e.to_schema,   '.', e.to_table)
+                             ELSE CONCAT(e.from_schema, '.', e.from_table) END, '|')
+    FROM params p, fk_edges e, dirs d
+    WHERE (d.dir = 'outgoing' AND e.from_schema = p.p_schema AND e.from_table = p.p_table)
+       OR (d.dir = 'incoming' AND e.to_schema   = p.p_schema AND e.to_table   = p.p_table)
     UNION ALL
-    SELECT p.p_schema, p.p_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
-           'incoming', 1,
-           CONCAT('|', p.p_schema, '.', p.p_table, '|', e.from_schema, '.', e.from_table, '|')
-    FROM params p, fk_edges e
-    WHERE e.to_schema = p.p_schema AND e.to_table = p.p_table
-    UNION ALL
-    SELECT t.child_schema, t.child_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
-           'outgoing', t.depth + 1,
-           CONCAT(t.path, e.to_schema, '.', e.to_table, '|')
-    FROM fk_tree t, params p, fk_edges e
-    WHERE e.from_schema = t.child_schema AND e.from_table = t.child_table
-    AND t.depth < p.p_depth
-    AND LOCATE(CONCAT('|', e.to_schema, '.', e.to_table, '|'), t.path) = 0
-    UNION ALL
-    SELECT t.child_schema, t.child_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
-           'incoming', t.depth + 1,
-           CONCAT(t.path, e.from_schema, '.', e.from_table, '|')
-    FROM fk_tree t, params p, fk_edges e
-    WHERE e.to_schema = t.child_schema AND e.to_table = t.child_table
-    AND t.depth < p.p_depth
-    AND LOCATE(CONCAT('|', e.from_schema, '.', e.from_table, '|'), t.path) = 0
+    SELECT t.child_schema, t.child_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, t.depth + 1,
+           CONCAT(t.path,
+                  CASE d.dir WHEN 'outgoing' THEN CONCAT(e.to_schema,   '.', e.to_table)
+                             ELSE CONCAT(e.from_schema, '.', e.from_table) END, '|')
+    FROM fk_tree t, params p, fk_edges e, dirs d
+    WHERE t.depth < p.p_depth
+    AND ((d.dir = 'outgoing' AND e.from_schema = t.child_schema AND e.from_table = t.child_table
+          AND LOCATE(CONCAT('|', e.to_schema,   '.', e.to_table,   '|'), t.path) = 0)
+      OR (d.dir = 'incoming' AND e.to_schema   = t.child_schema AND e.to_table   = t.child_table
+          AND LOCATE(CONCAT('|', e.from_schema, '.', e.from_table, '|'), t.path) = 0))
 )
 SELECT parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth
 FROM fk_tree ORDER BY depth`
