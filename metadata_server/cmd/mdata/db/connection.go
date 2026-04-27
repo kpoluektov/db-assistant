@@ -369,23 +369,23 @@ func assembleRelationTree(schema, table string, edges []treeEdgeRow) *RelationNo
 	root := &RelationNode{Schema: schema, Table: table}
 	rootKey := strings.ToLower(schema) + "." + strings.ToLower(table)
 	nodeMap := map[string]*RelationNode{rootKey: root}
-	visited := map[string]bool{rootKey: true}
 
 	for _, e := range edges {
-		childKey := strings.ToLower(e.childSchema) + "." + strings.ToLower(e.childTable)
-		if visited[childKey] {
-			continue
-		}
-		visited[childKey] = true
-
 		parentKey := strings.ToLower(e.parentSchema) + "." + strings.ToLower(e.parentTable)
 		parent, ok := nodeMap[parentKey]
 		if !ok {
 			continue
 		}
 
-		child := &RelationNode{Schema: e.childSchema, Table: e.childTable}
-		nodeMap[childKey] = child
+		childKey := strings.ToLower(e.childSchema) + "." + strings.ToLower(e.childTable)
+		child, exists := nodeMap[childKey]
+		if !exists {
+			child = &RelationNode{Schema: e.childSchema, Table: e.childTable}
+			nodeMap[childKey] = child
+		}
+
+		// Always add the edge — multiple FK constraints between the same table pair
+		// are all represented; cycles are already prevented by the SQL path array.
 		parent.Relations = append(parent.Relations, &RelationEdge{
 			ConstraintName: e.constraintName,
 			FromColumn:     e.fromColumn,
