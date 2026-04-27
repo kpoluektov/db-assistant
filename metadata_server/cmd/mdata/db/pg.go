@@ -93,7 +93,7 @@ func (conn PGConnector) GetRelationTreeSQL() string {
 	// one of the recursive branches inside the anchor). Both directions (outgoing/incoming) are
 	// handled via a CROSS JOIN with a two-row direction selector so the whole CTE stays binary.
 	return `WITH RECURSIVE
-params(p_schema, p_table, p_depth) AS (VALUES ($1::text, $2::text, $3::int)),
+params(p_schema, p_table, p_depth) AS (VALUES ($1::text COLLATE "C", $2::text COLLATE "C", $3::int)),
 fk_edges AS (
     SELECT tc.table_schema AS from_schema, tc.table_name AS from_table, kcu.column_name AS from_col,
            ccu.table_schema AS to_schema, ccu.table_name AS to_table, ccu.column_name AS to_col,
