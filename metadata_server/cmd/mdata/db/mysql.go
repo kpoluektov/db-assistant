@@ -122,15 +122,48 @@ func (conn MySQLConnector) GetRoCommand() string {
 	return `set session transaction read only;`
 }
 
-func (conn MySQLConnector) GetForeignKeys() string {
-	return `SELECT kcu.constraint_name,
-		kcu.table_schema AS from_schema, kcu.table_name AS from_table, kcu.column_name AS from_column,
-		kcu.referenced_table_schema AS to_schema, kcu.referenced_table_name AS to_table, kcu.referenced_column_name AS to_column
-	FROM information_schema.key_column_usage AS kcu
-	JOIN information_schema.table_constraints AS tc
-		ON tc.constraint_name = kcu.constraint_name
-		AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name
-	WHERE tc.constraint_type = 'FOREIGN KEY'
-	AND kcu.referenced_table_name IS NOT NULL
-	AND ((kcu.table_schema = ? AND kcu.table_name = ?) OR (kcu.referenced_table_schema = ? AND kcu.referenced_table_name = ?))`
+func (conn MySQLConnector) GetRelationTreeSQL() string {
+	return `WITH RECURSIVE
+params AS (SELECT ? AS p_schema, ? AS p_table, ? AS p_depth),
+fk_edges AS (
+    SELECT kcu.table_schema AS from_schema, kcu.table_name AS from_table, kcu.column_name AS from_col,
+           kcu.referenced_table_schema AS to_schema, kcu.referenced_table_name AS to_table,
+           kcu.referenced_column_name AS to_col, kcu.constraint_name
+    FROM information_schema.key_column_usage kcu
+    JOIN information_schema.table_constraints tc
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name
+    WHERE tc.constraint_type = 'FOREIGN KEY' AND kcu.referenced_table_name IS NOT NULL
+),
+fk_tree(parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth, path) AS (
+    SELECT p.p_schema, p.p_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
+           'outgoing', 1,
+           CONCAT('|', p.p_schema, '.', p.p_table, '|', e.to_schema, '.', e.to_table, '|')
+    FROM params p, fk_edges e
+    WHERE e.from_schema = p.p_schema AND e.from_table = p.p_table
+    UNION ALL
+    SELECT p.p_schema, p.p_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
+           'incoming', 1,
+           CONCAT('|', p.p_schema, '.', p.p_table, '|', e.from_schema, '.', e.from_table, '|')
+    FROM params p, fk_edges e
+    WHERE e.to_schema = p.p_schema AND e.to_table = p.p_table
+    UNION ALL
+    SELECT t.child_schema, t.child_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
+           'outgoing', t.depth + 1,
+           CONCAT(t.path, e.to_schema, '.', e.to_table, '|')
+    FROM fk_tree t, params p, fk_edges e
+    WHERE e.from_schema = t.child_schema AND e.from_table = t.child_table
+    AND t.depth < p.p_depth
+    AND LOCATE(CONCAT('|', e.to_schema, '.', e.to_table, '|'), t.path) = 0
+    UNION ALL
+    SELECT t.child_schema, t.child_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
+           'incoming', t.depth + 1,
+           CONCAT(t.path, e.from_schema, '.', e.from_table, '|')
+    FROM fk_tree t, params p, fk_edges e
+    WHERE e.to_schema = t.child_schema AND e.to_table = t.child_table
+    AND t.depth < p.p_depth
+    AND LOCATE(CONCAT('|', e.from_schema, '.', e.from_table, '|'), t.path) = 0
+)
+SELECT parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth
+FROM fk_tree ORDER BY depth`
 }

@@ -76,15 +76,48 @@ func (conn OraConnector) GetRoCommand() string {
 	return `set transaction read only;`
 }
 
-func (conn OraConnector) GetForeignKeys() string {
-	return `SELECT c.constraint_name,
-		c.owner AS from_schema, c.table_name AS from_table, cc.column_name AS from_column,
-		r.owner AS to_schema, r.table_name AS to_table, rc.column_name AS to_column
-	FROM all_constraints c
-	JOIN all_cons_columns cc ON cc.constraint_name = c.constraint_name AND cc.owner = c.owner
-	JOIN all_constraints r ON r.constraint_name = c.r_constraint_name AND r.owner = c.r_owner
-	JOIN all_cons_columns rc ON rc.constraint_name = r.constraint_name AND rc.owner = r.owner
-		AND rc.position = cc.position
-	WHERE c.constraint_type = 'R'
-	AND ((c.owner = upper(:1) AND c.table_name = upper(:2)) OR (r.owner = upper(:3) AND r.table_name = upper(:4)))`
+func (conn OraConnector) GetRelationTreeSQL() string {
+	return `WITH params AS (SELECT upper(:1) AS p_schema, upper(:2) AS p_table, :3 AS p_depth FROM dual),
+fk_edges AS (
+    SELECT c.owner AS from_schema, c.table_name AS from_table, cc.column_name AS from_col,
+           r.owner AS to_schema, r.table_name AS to_table, rc.column_name AS to_col,
+           c.constraint_name
+    FROM all_constraints c
+    JOIN all_cons_columns cc ON cc.constraint_name = c.constraint_name AND cc.owner = c.owner
+    JOIN all_constraints r ON r.constraint_name = c.r_constraint_name AND r.owner = c.r_owner
+    JOIN all_cons_columns rc ON rc.constraint_name = r.constraint_name AND rc.owner = r.owner
+        AND rc.position = cc.position
+    WHERE c.constraint_type = 'R'
+),
+fk_tree(parent_schema, parent_table, child_schema, child_table, constraint_name, from_col, to_col, direction, depth, path) AS (
+    SELECT p.p_schema, p.p_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
+           'outgoing', 1,
+           '|'||p.p_schema||'.'||p.p_table||'|'||e.to_schema||'.'||e.to_table||'|'
+    FROM params p, fk_edges e
+    WHERE e.from_schema = p.p_schema AND e.from_table = p.p_table
+    UNION ALL
+    SELECT p.p_schema, p.p_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
+           'incoming', 1,
+           '|'||p.p_schema||'.'||p.p_table||'|'||e.from_schema||'.'||e.from_table||'|'
+    FROM params p, fk_edges e
+    WHERE e.to_schema = p.p_schema AND e.to_table = p.p_table
+    UNION ALL
+    SELECT t.child_schema, t.child_table, e.to_schema, e.to_table, e.constraint_name, e.from_col, e.to_col,
+           'outgoing', t.depth + 1,
+           t.path||e.to_schema||'.'||e.to_table||'|'
+    FROM fk_tree t, params p, fk_edges e
+    WHERE e.from_schema = t.child_schema AND e.from_table = t.child_table
+    AND t.depth < p.p_depth
+    AND INSTR(t.path, '|'||e.to_schema||'.'||e.to_table||'|') = 0
+    UNION ALL
+    SELECT t.child_schema, t.child_table, e.from_schema, e.from_table, e.constraint_name, e.from_col, e.to_col,
+           'incoming', t.depth + 1,
+           t.path||e.from_schema||'.'||e.from_table||'|'
+    FROM fk_tree t, params p, fk_edges e
+    WHERE e.to_schema = t.child_schema AND e.to_table = t.child_table
+    AND t.depth < p.p_depth
+    AND INSTR(t.path, '|'||e.from_schema||'.'||e.from_table||'|') = 0
+)
+SELECT parent_schema, parent_table, child_schema, child_table, constraint_name, from_col, to_col, direction, depth
+FROM fk_tree ORDER BY depth`
 }
