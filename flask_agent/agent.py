@@ -38,9 +38,15 @@ async def initialize_schema(settings) -> None:
         table_names = [t["name"] for t in list_data.get("tables", [])]
 
         lines = [
-            f"# Database schema: {schema}",
+            "# Database schema",
             "",
-            "Use this schema reference when writing SQL for the user.",
+            f"**Default schema: `{schema}`**",
+            "",
+            f"Always use `{schema}` as the schema qualifier in all SQL queries "
+            f"(e.g. `{schema}.table_name`, `FROM {schema}.orders`). "
+            "Never ask the user to specify the schema — it is always `{schema}`.".replace("{schema}", schema),
+            "",
+            "Use the table reference below when writing SQL for the user.",
             "",
         ]
         for table_name in table_names:
