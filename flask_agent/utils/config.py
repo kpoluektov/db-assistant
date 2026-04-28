@@ -19,6 +19,7 @@ class YandexSettings(BaseModel):
     MASKING_INDEX_ID: str
     WAIT_TIMEOUT: int
     METADATA_SCHEMA: str = "public"
+    MAX_TURNS: int = 25
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

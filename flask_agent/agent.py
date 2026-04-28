@@ -114,9 +114,11 @@ class YandexAssistant:
                 client_session_timeout_seconds=30,
             )
         )
+        schema_context = _load_schema_context()
         self._metaAssistant = Agent(
             name="MetadataAgent",
-            instructions=self.settings.yandex.METADATA_INSTRUCTION,
+            instructions=self.settings.yandex.METADATA_INSTRUCTION 
+             + (f"\n\n{schema_context}" if schema_context else ""),
             mcp_servers=[self._getMetadata],
         )
         self._maskingAssistant = Agent(
@@ -134,7 +136,6 @@ class YandexAssistant:
             name="AssistantAgent",
             instructions=(
                 f"{RECOMMENDED_PROMPT_PREFIX}\n{self.settings.yandex.ASSISTANT_INSTRUCTION}"
-                + (f"\n\n{schema_context}" if schema_context else "")
             ),
             handoffs=[
                 handoff(
@@ -146,7 +147,7 @@ class YandexAssistant:
                     input_filter=handoff_filters.remove_all_tools,
                 ),
             ],
-            model_settings=ModelSettings(tool_choice="auto", reasoning={"effort": "high"}),
+            model_settings=ModelSettings(tool_choice="auto", reasoning={"effort": "low"}),
         )
         return self
 
@@ -161,9 +162,8 @@ class YandexAssistant:
                 run_config=self._rc,
                 hooks=self._hooks,
                 session=self._session,
-                max_turns=25,
+                max_turns=self.settings.yandex.MAX_TURNS,
             )
-            #return response.final_output or "No response from assistant"
-            return response
+            return response.final_output or "No response from assistant"
         except Exception as e:
             return f"Error: {e}"
