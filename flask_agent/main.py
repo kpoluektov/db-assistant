@@ -52,7 +52,8 @@ class SqlRequest(BaseModel):
 
 @app.get('/')
 async def index(request: Request):
-    return templates.TemplateResponse(request, 'index.html')
+    return templates.TemplateResponse(request, 'index.html',
+                                       headers={"Cache-Control": "no-store"})
 
 
 @app.get('/api/sql-presets')
