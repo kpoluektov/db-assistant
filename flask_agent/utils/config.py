@@ -19,6 +19,7 @@ class YandexSettings(BaseModel):
     WAIT_TIMEOUT: int
     METADATA_SCHEMA: str = "public"
     MAX_TURNS: int = 25
+    SQL_PRESETS: list[dict[str, str]] = []
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

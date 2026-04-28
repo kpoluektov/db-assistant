@@ -55,6 +55,11 @@ async def index(request: Request):
     return templates.TemplateResponse(request, 'index.html')
 
 
+@app.get('/api/sql-presets')
+async def sql_presets():
+    return settings.yandex.SQL_PRESETS
+
+
 @app.post('/api/sql')
 async def run_sql(body: SqlRequest):
     try:

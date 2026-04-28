@@ -88,22 +88,33 @@ func (conn PGConnector) GetRoCommand() string {
 }
 
 func (conn PGConnector) GetRelationTreeSQL() string {
-	// A recursive CTE in PostgreSQL must have exactly ONE top-level UNION ALL separating the
-	// non-recursive anchor from the recursive term (left-associative parsing would otherwise put
-	// one of the recursive branches inside the anchor). Both directions (outgoing/incoming) are
-	// handled via a CROSS JOIN with a two-row direction selector so the whole CTE stays binary.
+	// Uses pg_catalog instead of information_schema: the information_schema join condition
+	// ccu.table_schema = tc.table_schema compares the *referenced* table's schema against
+	// the FK table's schema, which silently returns 0 rows on some Managed PostgreSQL
+	// configurations even when FK constraints exist.
+	// pg_catalog is always accessible and handles multi-column FKs correctly via LATERAL unnest
+	// with WITH ORDINALITY to preserve the column-position pairing.
 	return `WITH RECURSIVE
-params(p_schema, p_table, p_depth) AS (VALUES ($1::text COLLATE "C", $2::text COLLATE "C", $3::int)),
+params(p_schema, p_table, p_depth) AS (VALUES ($1::text, $2::text, $3::int)),
 fk_edges AS (
-    SELECT tc.table_schema AS from_schema, tc.table_name AS from_table, kcu.column_name AS from_col,
-           ccu.table_schema AS to_schema, ccu.table_name AS to_table, ccu.column_name AS to_col,
-           tc.constraint_name
-    FROM information_schema.table_constraints tc
-    JOIN information_schema.key_column_usage kcu
-        ON tc.constraint_name = kcu.constraint_name AND tc.table_schema = kcu.table_schema
-    JOIN information_schema.constraint_column_usage ccu
-        ON ccu.constraint_name = tc.constraint_name AND ccu.table_schema = tc.table_schema
-    WHERE tc.constraint_type = 'FOREIGN KEY'
+    SELECT
+        ns1.nspname  AS from_schema,
+        t1.relname   AS from_table,
+        a1.attname   AS from_col,
+        ns2.nspname  AS to_schema,
+        t2.relname   AS to_table,
+        a2.attname   AS to_col,
+        c.conname    AS constraint_name
+    FROM pg_catalog.pg_constraint c
+    JOIN pg_catalog.pg_class     t1  ON t1.oid = c.conrelid
+    JOIN pg_catalog.pg_namespace ns1 ON ns1.oid = t1.relnamespace
+    JOIN pg_catalog.pg_class     t2  ON t2.oid = c.confrelid
+    JOIN pg_catalog.pg_namespace ns2 ON ns2.oid = t2.relnamespace
+    JOIN LATERAL unnest(c.conkey)  WITH ORDINALITY AS fkcol(attnum, ord) ON true
+    JOIN LATERAL unnest(c.confkey) WITH ORDINALITY AS pkcol(attnum, ord) ON fkcol.ord = pkcol.ord
+    JOIN pg_catalog.pg_attribute a1 ON a1.attrelid = c.conrelid  AND a1.attnum = fkcol.attnum
+    JOIN pg_catalog.pg_attribute a2 ON a2.attrelid = c.confrelid AND a2.attnum = pkcol.attnum
+    WHERE c.contype = 'f'
 ),
 dirs(dir) AS (VALUES ('outgoing'::text), ('incoming'::text)),
 fk_tree(parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth, path) AS (

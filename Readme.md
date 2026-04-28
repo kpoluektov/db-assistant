@@ -153,6 +153,9 @@ YANDEX__LOG_FILE_NAME=agent_main.log
 YANDEX__ASSISTANT_INSTRUCTION=<промпт для AssistantAgent>
 YANDEX__METADATA_INSTRUCTION=<промпт для MetadataAgent>
 YANDEX__MASKING_INSTRUCTION=<промпт для DataMaskingAgent>
+
+# Преднастроенные SQL-запросы для SQL-консоли (JSON-массив)
+YANDEX__SQL_PRESETS=[{"description":"Список таблиц","sql":"SELECT table_name, table_type\nFROM information_schema.tables\nWHERE table_schema = 'public'\nORDER BY table_name"},{"description":"Размер таблиц","sql":"SELECT relname AS table, pg_size_pretty(pg_total_relation_size(oid)) AS size\nFROM pg_class WHERE relkind = 'r' ORDER BY pg_total_relation_size(oid) DESC LIMIT 20"}]
 ```
 
 **Описание параметров**
@@ -173,6 +176,7 @@ YANDEX__MASKING_INSTRUCTION=<промпт для DataMaskingAgent>
 | `YANDEX__ASSISTANT_INSTRUCTION` | Системный промпт главного агента |
 | `YANDEX__METADATA_INSTRUCTION` | Системный промпт MetadataAgent |
 | `YANDEX__MASKING_INSTRUCTION` | Системный промпт DataMaskingAgent |
+| `YANDEX__SQL_PRESETS` | JSON-массив преднастроенных SQL-запросов (см. ниже) |
 
 > Настройки используют Pydantic `BaseSettings` с вложенным разделителем `__` — всё в разделе `YANDEX__*`. Подробнее: `flask_agent/utils/config.py`.
 

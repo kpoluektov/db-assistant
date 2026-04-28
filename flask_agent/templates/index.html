@@ -63,6 +63,8 @@
           <span id="sql-status"></span>
         </div>
 
+        <div id="sql-presets"></div>
+
         <div id="sql-editor-wrap">
           <textarea id="sql-input" spellcheck="false"
                     placeholder="SELECT * FROM public.orders LIMIT 10"></textarea>
@@ -349,6 +351,27 @@
         sqlRunBtn.disabled = false;
       }
     }
+
+    // ── SQL presets ──────────────────────────────────────────────────
+    (async function loadPresets() {
+      try {
+        const presets = await fetch('/api/sql-presets').then(r => r.json());
+        if (!presets.length) return;
+        const bar = document.getElementById('sql-presets');
+        presets.forEach(p => {
+          const btn = document.createElement('button');
+          btn.className = 'preset-btn';
+          btn.textContent = p.description;
+          btn.addEventListener('click', () => {
+            sqlInput.value = p.sql;
+            bar.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            sqlInput.focus();
+          });
+          bar.appendChild(btn);
+        });
+      } catch {}
+    })();
 
     sqlRunBtn.addEventListener('click', runSQL);
 

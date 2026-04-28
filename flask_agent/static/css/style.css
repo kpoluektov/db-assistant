@@ -475,6 +475,40 @@ body {
 #sql-status.status-ok    { color: #3dd68c; }
 #sql-status.status-error { color: #f26c6c; }
 
+/* preset buttons strip */
+#sql-presets {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  overflow-x: auto;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--border);
+}
+#sql-presets:empty { display: none; }
+#sql-presets::-webkit-scrollbar { height: 4px; }
+#sql-presets::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.preset-btn {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--muted);
+  font-size: 12px;
+  font-family: var(--font);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.preset-btn:hover { border-color: var(--accent); color: var(--text); }
+.preset-btn.active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: rgba(91, 124, 246, .12);
+}
+
 /* textarea */
 #sql-editor-wrap {
   padding: 10px 12px 0;
