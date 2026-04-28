@@ -27,19 +27,14 @@ type ConnectionManager struct {
 
 func (c *ConnectionManager) AddConnection(dsn DSN) (string, error) {
 	connector, err := InitPool(&dsn)
+	if err != nil {
+		return "", err
+	}
+	if err = connector.GetPool().Ping(); err != nil {
+		return "", err
+	}
 	s := uuid.New().String()
-	if err != nil {
-		log.Printf("Unable to create connection pool: %v\n", err)
-	} else {
-		err = connector.GetPool().Ping()
-		log.Printf("Connection %s accepted", s)
-	}
-	if err != nil {
-		log.Printf("Wrong connection pool: %v\n", err.Error())
-	}
-	if err != nil {
-		panic("can't open connection")
-	}
+	log.Printf("Connection %s accepted", s)
 
 	c.store.mu.Lock()
 	defer c.store.mu.Unlock()

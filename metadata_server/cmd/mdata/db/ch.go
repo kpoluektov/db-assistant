@@ -2,7 +2,6 @@ package db
 
 import (
 	"database/sql"
-	"log"
 )
 
 type ClickHouseConnector struct {
@@ -11,12 +10,6 @@ type ClickHouseConnector struct {
 
 func (conn *ClickHouseConnector) GetStatus() string {
 	return "OK"
-}
-
-func (conn *ClickHouseConnector) test() {
-	// print connection properties
-	log.Printf("propertise %s", conn.pool.Stats().WaitDuration)
-
 }
 
 func (conn *ClickHouseConnector) Close() {

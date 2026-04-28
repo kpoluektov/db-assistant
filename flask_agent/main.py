@@ -108,4 +108,4 @@ if __name__ == "__main__":
     t = threading.Thread(target=_run_init_in_thread, daemon=False)
     t.start()
     t.join()
-    socketio.run(app, host='0.0.0.0', port=settings.yandex.PORT, debug=True)
+    socketio.run(app, host='0.0.0.0', port=settings.yandex.PORT, debug=False)

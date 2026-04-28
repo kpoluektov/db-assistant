@@ -40,7 +40,6 @@ func NewMySQLConnector(dsn *DSN) (*MySQLConnector, error) {
 		dsnStr = fmt.Sprintf("%s://%s:%s@%s:%s/%s",
 			dsn.DbType, dsn.Username, dsn.Password, dsn.DbHost, dsn.DbPort, dsn.Database)
 	}
-	// log.Printf("current dsn is %s", dsnStr)
 	c, err := sql.Open("mysql", dsnStr)
 	return &MySQLConnector{c}, err
 }

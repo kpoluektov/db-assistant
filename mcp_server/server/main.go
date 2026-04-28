@@ -26,7 +26,7 @@ func init() {
 }
 
 const (
-	CONNECTION_PRIFIX  = "connection"
+	CONNECTION_PREFIX  = "connection"
 	CONNECT_COMMAND    = "open"
 	CLOSE_COMMAND      = "close"
 	STATS_PREFIX       = "stats"
@@ -195,8 +195,6 @@ func loadEnvs() {
 }
 
 func connectMetaServer() (string, error) {
-	var sessID string
-	// Define form data
 	formData := url.Values{}
 	formData.Set("username", metaUser)
 	formData.Set("password", metaPass)
@@ -207,39 +205,32 @@ func connectMetaServer() (string, error) {
 	if len(metaCAPath) > 0 {
 		formData.Set("capath", metaCAPath)
 	}
-
-	// Encode the form data
-	reqBody := strings.NewReader(formData.Encode())
-	//log.Print(reqBody)
-	hostURL, err := url.Parse(fmt.Sprintf("%s/%s/%s", metaURL, CONNECTION_PRIFIX, CONNECT_COMMAND))
-	//log.Print(hostURL.String())
-	connectResp, err := http.Post(hostURL.String(), CONTENT_TYPE, reqBody)
+	connectResp, err := http.Post(
+		fmt.Sprintf("%s/%s/%s", metaURL, CONNECTION_PREFIX, CONNECT_COMMAND),
+		CONTENT_TYPE,
+		strings.NewReader(formData.Encode()),
+	)
 	if err != nil {
-		log.Fatal(err)
+		return "", fmt.Errorf("connect metadata server: %w", err)
 	}
 	defer connectResp.Body.Close()
-	if connectResp.StatusCode == http.StatusAccepted {
-
-		cookies := connectResp.Cookies()
-		for _, c := range cookies {
-			if c.Name == SessionID {
-				sessID = c.Value
-			}
-		}
-		bodyBytes, err := io.ReadAll(connectResp.Body)
-		if err != nil {
-			log.Fatal(err)
-		}
-		bodyString := string(bodyBytes)
-		if !strings.Contains(bodyString, "true") {
-			return sessID, errors.New("Cannot connect to metadata server")
-		} else {
-			log.Printf("Connected to %s", metaURL)
-		}
-
-	} else {
-		log.Fatal("connection error. Status ", connectResp.StatusCode, connectResp.Body)
+	if connectResp.StatusCode != http.StatusAccepted {
+		return "", fmt.Errorf("connect metadata server: status %d", connectResp.StatusCode)
 	}
+	var sessID string
+	for _, c := range connectResp.Cookies() {
+		if c.Name == SessionID {
+			sessID = c.Value
+		}
+	}
+	bodyBytes, err := io.ReadAll(connectResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("connect metadata server: read response: %w", err)
+	}
+	if !strings.Contains(string(bodyBytes), "true") {
+		return "", errors.New("cannot connect to metadata server")
+	}
+	log.Printf("Connected to %s", metaURL)
 	return sessID, nil
 }
 
@@ -260,18 +251,18 @@ func createRequest(method string, url string, body io.Reader, sID string) (*http
 }
 
 func disconnectMetaServer(sessID string) {
-	formData := url.Values{}
-	reqBody := strings.NewReader(formData.Encode())
-	//log.Print(reqBody)
-	hostURL, err := url.Parse(fmt.Sprintf("%s/%s/%s", metaURL, CONNECTION_PRIFIX, CLOSE_COMMAND))
-	//log.Print(hostURL.String())
 	client := &http.Client{}
-	req, err := createRequest("POST", hostURL.String(), reqBody, sessID)
-	connectResp, err := client.Do(req)
+	req, err := createRequest("POST", fmt.Sprintf("%s/%s/%s", metaURL, CONNECTION_PREFIX, CLOSE_COMMAND), strings.NewReader(""), sessID)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("disconnect: create request: %v", err)
+		return
 	}
-	defer connectResp.Body.Close()
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("disconnect: %v", err)
+		return
+	}
+	resp.Body.Close()
 }
 
 func makeRequestOnTable(path string, request mcp.CallToolRequest) (string, error) {
@@ -298,7 +289,6 @@ func makeWideRequest(path string, verb string, body io.Reader) (string, error) {
 		return "", err
 	}
 	client := &http.Client{}
-	//log.Printf("wide get request with %s for sessionID %s", fmt.Sprintf(patt, values), sessID)
 	req, err := createRequest(verb, path, body, sessID)
 	resp, err := client.Do(req)
 	if err != nil {
@@ -309,7 +299,7 @@ func makeWideRequest(path string, verb string, body io.Reader) (string, error) {
 	if resp.StatusCode >= http.StatusOK && resp.StatusCode <= http.StatusAccepted {
 		bodyBytes, err := io.ReadAll(resp.Body)
 		if err != nil {
-			log.Fatal(err)
+			return "", fmt.Errorf("read response: %w", err)
 		}
 		bodyString = string(bodyBytes)
 	} else {

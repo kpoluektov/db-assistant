@@ -35,7 +35,7 @@ type Column struct {
 
 type Stats struct {
 	NumRows      nulls.Int  `json:"numrows,omitempty"`
-	LastAnalized nulls.Time `json:"lastanalyzed,omitempty"`
+	LastAnalyzed nulls.Time `json:"lastanalyzed,omitempty"`
 }
 
 type IndexColumn struct {
@@ -44,9 +44,9 @@ type IndexColumn struct {
 }
 type Index struct {
 	Name         string         `json:"name"`
-	Uniquenes    bool           `json:unique`
-	Validity     bool           `json: valid`
-	IsPrimaryKey bool           `json: is_pk`
+	Uniqueness   bool           `json:"unique"`
+	Validity     bool           `json:"valid"`
+	IsPrimaryKey bool           `json:"is_pk"`
 	Columns      *[]IndexColumn `json:"columns,omitempty"`
 }
 type Parameter struct {
@@ -138,7 +138,6 @@ func (conn *Connection) GetTables(schema string, table string, size int, strict 
 	tables := []Table{}
 
 	sqlStr := conn.connector.GetTables(table, strict)
-	//log.Printf("sqlStr is %s", sqlStr)
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table, size)
 	if err != nil {
 		log.Printf("Query failed: %v\n", err)
@@ -178,44 +177,43 @@ func (conn *Connection) getColumns(schema string, table string) ([]Column, error
 
 	for rows.Next() {
 		var cName, cType string
-		var сDescription sql.NullString
+		var cDescription sql.NullString
 		var cLength nulls.Int
-		err = rows.Scan(&cName, &cType, &cLength, &сDescription)
+		err = rows.Scan(&cName, &cType, &cLength, &cDescription)
 		if err != nil {
 			break
 		}
-		columns = append(columns, Column{cName, cType, cLength, сDescription})
+		columns = append(columns, Column{cName, cType, cLength, cDescription})
 	}
 	if err != nil {
-		log.Printf("Rows quering failed: %v\n", err)
+		log.Printf("Rows querying failed: %v\n", err)
 	}
 	return columns, err
 }
 
 func (conn *Connection) GetStats(schema string, table string) (Stats, error) {
 	var numRows nulls.Int
-	var lastAnalized nulls.Time
+	var lastAnalyzed nulls.Time
 	sqlStr := conn.connector.GetStats()
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table)
 	if err != nil {
-		return Stats{numRows, lastAnalized}, err
+		return Stats{numRows, lastAnalyzed}, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		err = rows.Scan(&numRows, &lastAnalized)
+		err = rows.Scan(&numRows, &lastAnalyzed)
 	}
 	if err != nil {
 		log.Printf("Stats querying failed: %v\n", err)
 	}
-	return Stats{numRows, lastAnalized}, err
+	return Stats{numRows, lastAnalyzed}, err
 }
 
 func (conn *Connection) GetIndexes(schema string, table string) ([]Index, error) {
 	indexes := []Index{}
 
 	sqlStr := conn.connector.GetIndexes()
-	//log.Printf("sqlStr is %s", sqlStr)
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table)
 	if err != nil {
 		return nil, err
@@ -257,7 +255,7 @@ func (conn *Connection) getIndColumns(schema string, index string) ([]IndexColum
 		columns = append(columns, IndexColumn{cName, cPosition})
 	}
 	if err != nil {
-		log.Printf("Rows quering failed: %v\n", err)
+		log.Printf("Rows querying failed: %v\n", err)
 	}
 	return columns, err
 }
@@ -281,7 +279,7 @@ func (conn *Connection) GetParameter(pName string) ([]Parameter, error) {
 		params = append(params, Parameter{cName, cValue})
 	}
 	if err != nil {
-		log.Printf("Rows quering failed: %v\n", err)
+		log.Printf("Rows querying failed: %v\n", err)
 	}
 	return params, err
 }
@@ -317,7 +315,7 @@ func (conn *Connection) GetWideResult(pSQL string) ([]map[string]any, error) {
 		results = append(results, m)
 	}
 	if err = rows.Err(); err != nil {
-		log.Printf("Rows quering failed: %v\n", err)
+		log.Printf("Rows querying failed: %v\n", err)
 		return nil, err
 	}
 	return results, err
@@ -403,12 +401,12 @@ func GetVersion(connector Connector) string {
 	sqlStr := connector.GetVersionSQL()
 	rows, err := connector.GetPool().Query(sqlStr)
 	if err != nil {
-		log.Printf("Version queuing failed: %v\n", err)
+		log.Printf("Version query failed: %v\n", err)
 		return version
 	}
 	defer rows.Close()
-	if err != nil {
-		log.Printf("Version quering failed: %v\n", err)
+	if rows.Next() {
+		rows.Scan(&version)
 	}
 	return version
 }

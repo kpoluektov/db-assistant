@@ -10,5 +10,4 @@ class CustomModelProvider(ModelProvider):
         self.client = client
 
     def get_model(self, model_name: str | None) -> Model:
-        #print(model_name)
         return OpenAIResponsesModel(model=self._Model, openai_client=self.client)
