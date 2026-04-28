@@ -98,13 +98,13 @@ func (conn PGConnector) GetRelationTreeSQL() string {
 params(p_schema, p_table, p_depth) AS (VALUES ($1::text, $2::text, $3::int)),
 fk_edges AS (
     SELECT
-        ns1.nspname  AS from_schema,
-        t1.relname   AS from_table,
-        a1.attname   AS from_col,
-        ns2.nspname  AS to_schema,
-        t2.relname   AS to_table,
-        a2.attname   AS to_col,
-        c.conname    AS constraint_name
+        ns1.nspname::text  AS from_schema,
+        t1.relname::text   AS from_table,
+        a1.attname::text   AS from_col,
+        ns2.nspname::text  AS to_schema,
+        t2.relname::text   AS to_table,
+        a2.attname::text   AS to_col,
+        c.conname::text    AS constraint_name
     FROM pg_catalog.pg_constraint c
     JOIN pg_catalog.pg_class     t1  ON t1.oid = c.conrelid
     JOIN pg_catalog.pg_namespace ns1 ON ns1.oid = t1.relnamespace
