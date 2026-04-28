@@ -18,7 +18,7 @@
 Браузер
   │  WebSocket
   ▼
-flask_agent (Python, порт 8083)
+flask_agent (Python / FastAPI + uvicorn, порт 8083)
   │  OpenAI Agents SDK (Yandex AI Studio / Responses API)
   │
   ├─ AssistantAgent         ← главный агент, принимает запросы пользователя
@@ -140,9 +140,6 @@ YANDEX__MASKING_INDEX_ID=fvt...
 # Порт веб-интерфейса
 YANDEX__PORT=8083
 
-# Секретный ключ Flask-сессии (любая случайная строка)
-YANDEX__SECRET_KEY=change_me_to_random_string
-
 # Таймаут ожидания ответа от AI API (секунды)
 YANDEX__WAIT_TIMEOUT=45
 
@@ -169,8 +166,7 @@ YANDEX__MASKING_INSTRUCTION=<промпт для DataMaskingAgent>
 | `YANDEX__GET_INFO_MCP_URL` | SSE-эндпоинт MCP-сервера для MetadataAgent |
 | `YANDEX__METADATA_SCHEMA` | Схема, которую агент читает при старте и кладёт в контекст |
 | `YANDEX__MASKING_INDEX_ID` | ID Vector Store с документами по маскированию данных |
-| `YANDEX__PORT` | Порт Flask-приложения (8083 по умолчанию) |
-| `YANDEX__SECRET_KEY` | Секрет для подписи Flask-сессий |
+| `YANDEX__PORT` | Порт веб-приложения (8083 по умолчанию) |
 | `YANDEX__WAIT_TIMEOUT` | Таймаут (сек.) на ожидание одного ответа от AI API |
 | `YANDEX__MAX_TURNS` | Лимит шагов агента (tool calls + handoffs) за один запрос |
 | `YANDEX__LOG_FILE_NAME` | Путь к лог-файлу внутри контейнера |

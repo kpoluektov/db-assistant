@@ -4,8 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>DB Assistant</title>
-  <script src="//cdnjs.cloudflare.com/ajax/libs/socket.io/2.2.0/socket.io.js"
-          integrity="sha256-yr4fRk/GU1ehYJPAs8P4JlTgu0Hdsp4ZKrx8bDEDC3I=" crossorigin="anonymous"></script>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
   <link rel="stylesheet"
         href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
@@ -15,6 +14,8 @@
 </head>
 <body>
   <div id="app">
+
+    <!-- ── Header ──────────────────────────────────────── -->
     <header id="header">
       <div id="header-inner">
         <svg id="logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -27,20 +28,63 @@
       <div id="status-dot" class="dot-connecting" title="Подключение..."></div>
     </header>
 
-    <main id="messages"></main>
+    <!-- ── Split panels ────────────────────────────────── -->
+    <div id="panels">
 
-    <footer id="input-area">
-      <textarea id="message-input" rows="1"
-                placeholder="Введите вопрос по базе данных…"
-                autocomplete="off"></textarea>
-      <button id="send-btn" disabled title="Отправить">
-        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-          <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-        </svg>
-      </button>
-    </footer>
-  </div>
+      <!-- Left: Chat -->
+      <section id="chat-panel">
+        <main id="messages"></main>
+        <footer id="input-area">
+          <textarea id="message-input" rows="1"
+                    placeholder="Введите вопрос по базе данных…"
+                    autocomplete="off"></textarea>
+          <button id="send-btn" disabled title="Отправить">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </footer>
+      </section>
+
+      <!-- Drag handle -->
+      <div id="panel-divider" title="Перетащите для изменения ширины"></div>
+
+      <!-- Right: SQL console -->
+      <section id="sql-panel">
+
+        <div id="sql-toolbar">
+          <span class="panel-title">
+            <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+              <path d="M3 5h14M3 10h8M3 15h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            SQL консоль
+          </span>
+          <span id="sql-status"></span>
+        </div>
+
+        <div id="sql-editor-wrap">
+          <textarea id="sql-input" spellcheck="false"
+                    placeholder="SELECT * FROM public.orders LIMIT 10"></textarea>
+        </div>
+
+        <div id="sql-actions">
+          <button id="sql-run-btn">
+            <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" width="12" height="12">
+              <path d="M3 2.5l10 5.5-10 5.5V2.5z"/>
+            </svg>
+            Выполнить
+          </button>
+          <span class="sql-hint">Ctrl+Enter</span>
+        </div>
+
+        <div id="sql-results">
+          <div class="sql-placeholder">Результаты запроса появятся здесь</div>
+        </div>
+
+      </section>
+    </div><!-- /panels -->
+  </div><!-- /app -->
 
   <script>
     // ── Marked config ───────────────────────────────────────────────
@@ -161,7 +205,7 @@
       // user echo — already shown optimistically, skip
     });
 
-    // ── Helpers ─────────────────────────────────────────────────────
+    // ── Chat helpers ────────────────────────────────────────────────
     function setStatus(state) {
       statusDot.className = 'dot-' + state;
       statusDot.title = { connected: 'Подключено', disconnected: 'Нет связи', connecting: 'Подключение…' }[state] || '';
@@ -176,7 +220,6 @@
 
       if (role === 'assistant') {
         bubble.innerHTML = marked.parse(raw || '');
-        // re-highlight any code blocks that marked didn't catch
         bubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
       } else {
         bubble.textContent = raw;
@@ -220,7 +263,6 @@
       showTyping();
     }
 
-    // ── Event listeners ─────────────────────────────────────────────
     sendBtn.addEventListener('click', sendMessage);
 
     input.addEventListener('keydown', (e) => {
@@ -230,12 +272,128 @@
       }
     });
 
-    // auto-grow textarea
     input.addEventListener('input', () => {
       input.style.height = '';
       input.style.height = Math.min(input.scrollHeight, 160) + 'px';
     });
+
+    // ── SQL console ──────────────────────────────────────────────────
+    const sqlInput   = document.getElementById('sql-input');
+    const sqlRunBtn  = document.getElementById('sql-run-btn');
+    const sqlStatus  = document.getElementById('sql-status');
+    const sqlResults = document.getElementById('sql-results');
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function renderTable(rows) {
+      if (!rows.length) {
+        sqlResults.innerHTML = '<div class="sql-empty">Запрос выполнен, строк нет</div>';
+        return;
+      }
+      const cols = Object.keys(rows[0]);
+      let html = '<div class="sql-table-wrap"><table><thead><tr>';
+      cols.forEach(c => { html += `<th>${escapeHtml(c)}</th>`; });
+      html += '</tr></thead><tbody>';
+      rows.forEach(row => {
+        html += '<tr>';
+        cols.forEach(c => {
+          const val = escapeHtml(row[c]);
+          html += `<td title="${val}">${val}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+      sqlResults.innerHTML = html;
+    }
+
+    async function runSQL() {
+      const sql = sqlInput.value.trim();
+      if (!sql) return;
+
+      sqlRunBtn.disabled = true;
+      sqlStatus.textContent = 'Выполняется…';
+      sqlStatus.className = '';
+      sqlResults.innerHTML = '<div class="sql-spinner"><span></span><span></span><span></span></div>';
+
+      const t0 = Date.now();
+      try {
+        const resp = await fetch('/api/sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql }),
+        });
+        const data = await resp.json();
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+
+        if (data.error) {
+          sqlStatus.textContent = `Ошибка (${elapsed}с)`;
+          sqlStatus.className = 'status-error';
+          sqlResults.innerHTML = `<div class="sql-error">${escapeHtml(data.error)}</div>`;
+        } else {
+          sqlStatus.textContent = `${data.count} ${plural(data.count, 'строка', 'строки', 'строк')} · ${elapsed}с`;
+          sqlStatus.className = 'status-ok';
+          renderTable(data.rows);
+        }
+      } catch (e) {
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+        sqlStatus.textContent = `Сетевая ошибка (${elapsed}с)`;
+        sqlStatus.className = 'status-error';
+        sqlResults.innerHTML = `<div class="sql-error">${escapeHtml(e.message)}</div>`;
+      } finally {
+        sqlRunBtn.disabled = false;
+      }
+    }
+
+    sqlRunBtn.addEventListener('click', runSQL);
+
+    sqlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        runSQL();
+      }
+    });
+
+    // ── Resizable divider ────────────────────────────────────────────
+    (function () {
+      const divider   = document.getElementById('panel-divider');
+      const chatPanel = document.getElementById('chat-panel');
+      const sqlPanel  = document.getElementById('sql-panel');
+      const panels    = document.getElementById('panels');
+      let dragging = false;
+
+      divider.addEventListener('mousedown', (e) => {
+        dragging = true;
+        divider.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        const rect  = panels.getBoundingClientRect();
+        const divW  = divider.offsetWidth;
+        const total = rect.width - divW;
+        let chatW   = e.clientX - rect.left;
+        chatW = Math.max(total * 0.2, Math.min(total * 0.8, chatW));
+        chatPanel.style.flex = `0 0 ${chatW}px`;
+        sqlPanel.style.flex  = '1 1 0';
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        divider.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      });
+    })();
   </script>
 </body>
 </html>
-

@@ -13,7 +13,6 @@ class YandexSettings(BaseModel):
     MODEL: str
     GET_INFO_MCP_URL:str
     LOG_FILE_NAME: str
-    SECRET_KEY: str
     PORT: int
     MASKING_INSTRUCTION: str
     MASKING_INDEX_ID: str
