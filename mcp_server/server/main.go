@@ -37,8 +37,10 @@ const (
 	SessionID          = "session"
 	TABLE_NAME_STR     = "tableName"
 	SCHEMA_NAME_STR    = "schemaName"
-	PARAMETER_PREFIX   = "parameter"
-	PARAMETER_NAME_STR = "parameterName"
+	PARAMETER_PREFIX      = "parameter"
+	PARAMETER_NAME_STR    = "parameterName"
+	RELATIONSHIPS_PREFIX  = "relationships"
+	WIDE_SQL_PREFIX       = "sql"
 
 	CONFIG_META_URL_STR    = "META_URL"
 	CONFIG_METADATA_HOST   = "MDATA_HOST"
@@ -50,6 +52,7 @@ const (
 	CONFIG_METADATA_CAPATH = "MDATA_CAPATH"
 	CONFIG_MCP_PORT        = "MCP_PORT"
 	CONFIG_MCP_HOST        = "MCP_HOST"
+	GET_VERB               = "GET"
 )
 
 var (
@@ -130,6 +133,27 @@ func main() {
 			mcp.Description("table name to retrieve indexes information for"),
 		),
 	)
+	wideSQLTool := mcp.NewTool("run_wide_sql",
+		mcp.WithDescription("Run wide SQL"),
+		mcp.WithString(WIDE_SQL_PREFIX,
+			mcp.Required(),
+			mcp.Description("SQL to execute"),
+		),
+	)
+	relationshipsTool := mcp.NewTool("get_relationships",
+		mcp.WithDescription("Retrieve FK dependency tree for a table showing which tables reference it and which tables it references, traversed up to the given depth"),
+		mcp.WithString(TABLE_NAME_STR,
+			mcp.Required(),
+			mcp.Description("table name to retrieve FK relationships for"),
+		),
+		mcp.WithString(SCHEMA_NAME_STR,
+			mcp.Required(),
+			mcp.Description("schema name where table exists"),
+		),
+		mcp.WithNumber("depth",
+			mcp.Description("maximum traversal depth 1-5 (default 5)"),
+		),
+	)
 
 	// Add tool handler
 	mcpServer.AddTool(statTool, getTableStatsHandler)
@@ -137,6 +161,8 @@ func main() {
 	mcpServer.AddTool(listTool, getTableListHandler)
 	mcpServer.AddTool(indexTool, getIndexesHandler)
 	mcpServer.AddTool(parameterTool, getParameterHandler)
+	mcpServer.AddTool(wideSQLTool, getWideSQLHandler)
+	mcpServer.AddTool(relationshipsTool, getRelationshipsHandler)
 
 	// Start the stdio server
 	// Run server in appropriate mode
@@ -260,11 +286,12 @@ func makeRequestOnTable(path string, request mcp.CallToolRequest) (string, error
 	log.Printf("looking for %s for table %s in schema %s", path, tableName, schemaName)
 	return makeWideRequest(
 		fmt.Sprintf("%s/%s/%s/%s", metaURL, path, url.QueryEscape(schemaName), url.QueryEscape(tableName)),
-		request,
+		GET_VERB,
+		nil,
 	)
 }
 
-func makeWideRequest(path string, request mcp.CallToolRequest) (string, error) {
+func makeWideRequest(path string, verb string, body io.Reader) (string, error) {
 	//create connection
 	sessID, err := connectMetaServer()
 	if err != nil {
@@ -272,7 +299,7 @@ func makeWideRequest(path string, request mcp.CallToolRequest) (string, error) {
 	}
 	client := &http.Client{}
 	//log.Printf("wide get request with %s for sessionID %s", fmt.Sprintf(patt, values), sessID)
-	req, err := createRequest("GET", path, nil, sessID)
+	req, err := createRequest(verb, path, body, sessID)
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("get page error: %w", err)
@@ -322,9 +349,44 @@ func getParameterHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp
 	if !ok {
 		return nil, errors.New("Parameter name must be a string")
 	}
-	resp, err := makeWideRequest(fmt.Sprintf("%s/%s/%s", metaURL, PARAMETER_PREFIX, url.QueryEscape(parameterName)), request)
+	resp, err :=
+		makeWideRequest(fmt.Sprintf("%s/%s/%s", metaURL, PARAMETER_PREFIX, url.QueryEscape(parameterName)), GET_VERB, nil)
 	if err != nil {
 		return nil, fmt.Errorf("get page error: %w", err)
+	}
+	return mcp.NewToolResultText(resp), nil
+}
+
+func getRelationshipsHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	tableName, ok := request.GetArguments()[TABLE_NAME_STR].(string)
+	if !ok {
+		return nil, errors.New("Table name must be a string")
+	}
+	schemaName, ok := request.GetArguments()[SCHEMA_NAME_STR].(string)
+	if !ok {
+		return nil, errors.New("Schema name must be a string")
+	}
+	reqURL := fmt.Sprintf("%s/%s/%s/%s", metaURL, RELATIONSHIPS_PREFIX, url.QueryEscape(schemaName), url.QueryEscape(tableName))
+	if depth, ok := request.GetArguments()["depth"].(float64); ok && depth >= 1 && depth <= 5 {
+		reqURL += fmt.Sprintf("?depth=%d", int(depth))
+	}
+	log.Printf("getting relationships for table %s in schema %s", tableName, schemaName)
+	resp, err := makeWideRequest(reqURL, GET_VERB, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get relationships error: %w", err)
+	}
+	return mcp.NewToolResultText(resp), nil
+}
+
+func getWideSQLHandler(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+
+	sql := request.GetArguments()[WIDE_SQL_PREFIX].(string)
+	data := url.Values{}
+	data.Set("sql", sql)
+	log.Printf("executing %s", sql)
+	resp, err := makeWideRequest(fmt.Sprintf("%s/%s", metaURL, WIDE_SQL_PREFIX), "POST", strings.NewReader(data.Encode()))
+	if err != nil {
+		return nil, fmt.Errorf("post error: %w", err)
 	}
 	return mcp.NewToolResultText(resp), nil
 }

@@ -25,8 +25,9 @@ func (conn OraConnector) GetPool() *sql.DB {
 }
 
 func (conn OraConnector) GetTables(table string, strict bool) string {
-	sqlStr := `select table_name from all_tables 
-where owner = upper(:1) and table_name %s order by table_name fetch first :3 rows only`
+	sqlStr := `select atn.table_name, atc.comments from all_tables atn, all_tab_comments atc
+				where atn.owner = atc.owner and atn.table_name = atc.table_name 
+				and atn.owner = upper(:1) and atn.table_name %s order by atn.table_name fetch first :3 rows only`
 	if !strict && (strings.Contains(table, "%") || strings.Contains(table, "_")) {
 		sqlStr = fmt.Sprintf(sqlStr, "like upper(:2)")
 	} else {
@@ -36,9 +37,11 @@ where owner = upper(:1) and table_name %s order by table_name fetch first :3 row
 }
 
 func (conn OraConnector) GetColumns() string {
-	return `select column_name, data_type, data_length 
-						from all_tab_columns where owner = upper(:1) 
-						and table_name = upper(:2) order by column_id`
+	return `select atc1.column_name, atc1.data_type, atc1.data_length, atc2.comments 
+						from all_tab_columns atc1, all_tab_comments atc2
+						where atc1.owner(+) = atc2.owner AND atc1.table_name(+) = atc2.table_name
+						and atc1.owner = upper(:1) 
+						and atc1.table_name = upper(:2) order by atc1.column_id`
 }
 func (conn OraConnector) GetStats() string {
 	return `select num_rows, last_analyzed from all_tables where owner = upper(:1) 
@@ -67,4 +70,51 @@ func (conn OraConnector) GetParameter() string {
 
 func (conn OraConnector) GetVersionSQL() string {
 	return `select banner from v$version`
+}
+
+func (conn OraConnector) GetRoCommand() string {
+	return `set transaction read only;`
+}
+
+func (conn OraConnector) GetRelationTreeSQL() string {
+	return `WITH params AS (SELECT upper(:1) AS p_schema, upper(:2) AS p_table, :3 AS p_depth FROM dual),
+fk_edges AS (
+    SELECT c.owner AS from_schema, c.table_name AS from_table, cc.column_name AS from_col,
+           r.owner AS to_schema, r.table_name AS to_table, rc.column_name AS to_col,
+           c.constraint_name
+    FROM all_constraints c
+    JOIN all_cons_columns cc ON cc.constraint_name = c.constraint_name AND cc.owner = c.owner
+    JOIN all_constraints r ON r.constraint_name = c.r_constraint_name AND r.owner = c.r_owner
+    JOIN all_cons_columns rc ON rc.constraint_name = r.constraint_name AND rc.owner = r.owner
+        AND rc.position = cc.position
+    WHERE c.constraint_type = 'R'
+),
+dirs(dir) AS (SELECT 'outgoing' FROM dual UNION ALL SELECT 'incoming' FROM dual),
+fk_tree(parent_schema, parent_table, child_schema, child_table, constraint_name, from_col, to_col, direction, depth, path) AS (
+    SELECT p.p_schema, p.p_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, 1,
+           '|'||p.p_schema||'.'||p.p_table||'|'||
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema||'.'||e.to_table
+                      ELSE e.from_schema||'.'||e.from_table END||'|'
+    FROM params p, fk_edges e, dirs d
+    WHERE (d.dir = 'outgoing' AND e.from_schema = p.p_schema AND e.from_table = p.p_table)
+       OR (d.dir = 'incoming' AND e.to_schema   = p.p_schema AND e.to_table   = p.p_table)
+    UNION ALL
+    SELECT t.child_schema, t.child_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, t.depth + 1,
+           t.path||CASE d.dir WHEN 'outgoing' THEN e.to_schema||'.'||e.to_table
+                              ELSE e.from_schema||'.'||e.from_table END||'|'
+    FROM fk_tree t, params p, fk_edges e, dirs d
+    WHERE t.depth < p.p_depth
+    AND ((d.dir = 'outgoing' AND e.from_schema = t.child_schema AND e.from_table = t.child_table
+          AND INSTR(t.path, '|'||e.to_schema||'.'||e.to_table||'|')     = 0)
+      OR (d.dir = 'incoming' AND e.to_schema   = t.child_schema AND e.to_table   = t.child_table
+          AND INSTR(t.path, '|'||e.from_schema||'.'||e.from_table||'|') = 0))
+)
+SELECT parent_schema, parent_table, child_schema, child_table, constraint_name, from_col, to_col, direction, depth
+FROM fk_tree ORDER BY depth`
 }

@@ -50,7 +50,7 @@ func (conn MySQLConnector) GetPool() *sql.DB {
 }
 
 func (conn MySQLConnector) GetTables(table string, strict bool) string {
-	sqlStr := `select table_name from information_schema.tables 
+	sqlStr := `select table_name, table_comment from information_schema.tables 
 	where table_type = 'BASE TABLE' and table_schema = ? and table_name %s order by table_name limit ?`
 	if !strict && (strings.Contains(table, "%") || strings.Contains(table, "_")) {
 		sqlStr = fmt.Sprintf(sqlStr, "like ?")
@@ -61,7 +61,7 @@ func (conn MySQLConnector) GetTables(table string, strict bool) string {
 }
 
 func (conn MySQLConnector) GetColumns() string {
-	return `select column_name, data_type, character_maximum_length 
+	return `select column_name, data_type, character_maximum_length, column_comment
 						from information_schema.columns where table_schema = ?
 						and table_name = ? order by ordinal_position`
 }
@@ -111,9 +111,57 @@ func createTLSConf(caPath string, clientCertPath string, clientKeyPath string) (
 }
 
 func (conn MySQLConnector) GetParameter() string {
-	return `SHOW VARIABLES WHERE Variable_name = ?`
+	return `show variables where variable_name = ?`
 }
 
 func (conn MySQLConnector) GetVersionSQL() string {
 	return `select version()`
+}
+
+func (conn MySQLConnector) GetRoCommand() string {
+	return `set session transaction read only;`
+}
+
+func (conn MySQLConnector) GetRelationTreeSQL() string {
+	return `WITH RECURSIVE
+params AS (SELECT ? AS p_schema, ? AS p_table, ? AS p_depth),
+fk_edges AS (
+    SELECT kcu.table_schema AS from_schema, kcu.table_name AS from_table, kcu.column_name AS from_col,
+           kcu.referenced_table_schema AS to_schema, kcu.referenced_table_name AS to_table,
+           kcu.referenced_column_name AS to_col, kcu.constraint_name
+    FROM information_schema.key_column_usage kcu
+    JOIN information_schema.table_constraints tc
+        ON tc.constraint_name = kcu.constraint_name
+        AND tc.table_schema = kcu.table_schema AND tc.table_name = kcu.table_name
+    WHERE tc.constraint_type = 'FOREIGN KEY' AND kcu.referenced_table_name IS NOT NULL
+),
+dirs AS (SELECT 'outgoing' AS dir UNION ALL SELECT 'incoming'),
+fk_tree(parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth, path) AS (
+    SELECT p.p_schema, p.p_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, 1,
+           CONCAT('|', p.p_schema, '.', p.p_table, '|',
+                  CASE d.dir WHEN 'outgoing' THEN CONCAT(e.to_schema,   '.', e.to_table)
+                             ELSE CONCAT(e.from_schema, '.', e.from_table) END, '|')
+    FROM params p, fk_edges e, dirs d
+    WHERE (d.dir = 'outgoing' AND e.from_schema = p.p_schema AND e.from_table = p.p_table)
+       OR (d.dir = 'incoming' AND e.to_schema   = p.p_schema AND e.to_table   = p.p_table)
+    UNION ALL
+    SELECT t.child_schema, t.child_table,
+           CASE d.dir WHEN 'outgoing' THEN e.to_schema   ELSE e.from_schema END,
+           CASE d.dir WHEN 'outgoing' THEN e.to_table    ELSE e.from_table  END,
+           e.constraint_name, e.from_col, e.to_col, d.dir, t.depth + 1,
+           CONCAT(t.path,
+                  CASE d.dir WHEN 'outgoing' THEN CONCAT(e.to_schema,   '.', e.to_table)
+                             ELSE CONCAT(e.from_schema, '.', e.from_table) END, '|')
+    FROM fk_tree t, params p, fk_edges e, dirs d
+    WHERE t.depth < p.p_depth
+    AND ((d.dir = 'outgoing' AND e.from_schema = t.child_schema AND e.from_table = t.child_table
+          AND LOCATE(CONCAT('|', e.to_schema,   '.', e.to_table,   '|'), t.path) = 0)
+      OR (d.dir = 'incoming' AND e.to_schema   = t.child_schema AND e.to_table   = t.child_table
+          AND LOCATE(CONCAT('|', e.from_schema, '.', e.from_table, '|'), t.path) = 0))
+)
+SELECT parent_schema, parent_table, child_schema, child_table, constraint_name, from_column, to_column, direction, depth
+FROM fk_tree ORDER BY depth`
 }

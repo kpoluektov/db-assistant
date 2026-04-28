@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/lefinal/nulls"
@@ -20,14 +21,16 @@ type DSN struct {
 }
 
 type Table struct {
-	Name    string    `json:"name"`
-	Columns *[]Column `json:"columns,omitempty"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description,omitempty"`
+	Columns     *[]Column      `json:"columns,omitempty"`
 }
 
 type Column struct {
-	Name   string    `json:"name"`
-	Type   string    `json:"type"`
-	Length nulls.Int `json:"length,omitempty"`
+	Name        string         `json:"name"`
+	Type        string         `json:"type"`
+	Length      nulls.Int      `json:"length,omitempty"`
+	Description sql.NullString `json:"description,omitempty"`
 }
 
 type Stats struct {
@@ -51,6 +54,20 @@ type Parameter struct {
 	Value string `json:"value"`
 }
 
+type RelationEdge struct {
+	ConstraintName string        `json:"constraint_name"`
+	FromColumn     string        `json:"from_column"`
+	ToColumn       string        `json:"to_column"`
+	Direction      string        `json:"direction"`
+	Node           *RelationNode `json:"node"`
+}
+
+type RelationNode struct {
+	Schema    string          `json:"schema"`
+	Table     string          `json:"table"`
+	Relations []*RelationEdge `json:"relations,omitempty"`
+}
+
 type Connector interface {
 	GetPool() *sql.DB
 	GetTables(table string, strict bool) string
@@ -60,6 +77,8 @@ type Connector interface {
 	GetIndColumns() string
 	GetParameter() string
 	GetVersionSQL() string
+	GetRoCommand() string
+	GetRelationTreeSQL() string
 }
 
 func InitPool(dsn *DSN) (Connector, error) {
@@ -121,22 +140,24 @@ func (conn *Connection) GetTables(schema string, table string, size int, strict 
 	sqlStr := conn.connector.GetTables(table, strict)
 	//log.Printf("sqlStr is %s", sqlStr)
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table, size)
-	defer rows.Close()
 	if err != nil {
 		log.Printf("Query failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var tName string
-		err = rows.Scan(&tName)
+		var tDescription sql.NullString
+		err = rows.Scan(&tName, &tDescription)
 		if err != nil {
 			break
 		}
 		if !strict {
-			tables = append(tables, Table{tName, nil})
+			tables = append(tables, Table{tName, tDescription, nil})
 		} else {
 			cols, _ := conn.getColumns(schema, table)
-			tables = append(tables, Table{tName, &cols})
+			tables = append(tables, Table{tName, tDescription, &cols})
 		}
 	}
 	if err != nil {
@@ -149,19 +170,21 @@ func (conn *Connection) getColumns(schema string, table string) ([]Column, error
 	columns := []Column{}
 	sqlStr := conn.connector.GetColumns()
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table)
-	defer rows.Close()
 	if err != nil {
 		log.Printf("Rows queuing failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var cName, cType string
+		var сDescription sql.NullString
 		var cLength nulls.Int
-		err = rows.Scan(&cName, &cType, &cLength)
+		err = rows.Scan(&cName, &cType, &cLength, &сDescription)
 		if err != nil {
 			break
 		}
-		columns = append(columns, Column{cName, cType, cLength})
+		columns = append(columns, Column{cName, cType, cLength, сDescription})
 	}
 	if err != nil {
 		log.Printf("Rows quering failed: %v\n", err)
@@ -174,10 +197,10 @@ func (conn *Connection) GetStats(schema string, table string) (Stats, error) {
 	var lastAnalized nulls.Time
 	sqlStr := conn.connector.GetStats()
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table)
-	defer rows.Close()
 	if err != nil {
-		log.Printf("Stats queuing failed: %v\n", err)
+		return Stats{numRows, lastAnalized}, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		err = rows.Scan(&numRows, &lastAnalized)
@@ -194,10 +217,10 @@ func (conn *Connection) GetIndexes(schema string, table string) ([]Index, error)
 	sqlStr := conn.connector.GetIndexes()
 	//log.Printf("sqlStr is %s", sqlStr)
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table)
-	defer rows.Close()
 	if err != nil {
-		log.Printf("Query get_index failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var iName string
@@ -219,10 +242,10 @@ func (conn *Connection) getIndColumns(schema string, index string) ([]IndexColum
 	columns := []IndexColumn{}
 	sqlStr := conn.connector.GetIndColumns()
 	rows, err := conn.connector.GetPool().Query(sqlStr, schema, index)
-	defer rows.Close()
 	if err != nil {
-		log.Printf("Rows queuing failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var cName string
@@ -243,10 +266,10 @@ func (conn *Connection) GetParameter(pName string) ([]Parameter, error) {
 	params := []Parameter{}
 	sqlStr := conn.connector.GetParameter()
 	rows, err := conn.connector.GetPool().Query(sqlStr, pName)
-	defer rows.Close()
 	if err != nil {
-		log.Printf("Rows queuing failed: %v\n", err)
+		return nil, err
 	}
+	defer rows.Close()
 
 	for rows.Next() {
 		var cName string
@@ -263,18 +286,127 @@ func (conn *Connection) GetParameter(pName string) ([]Parameter, error) {
 	return params, err
 }
 
+func (conn *Connection) GetWideResult(pSQL string) ([]map[string]any, error) {
+	finalSQL := conn.connector.GetRoCommand() + pSQL
+	rows, err := conn.connector.GetPool().Query(finalSQL)
+	if err != nil {
+		log.Printf("Rows queuing failed: %v\n", err)
+		return nil, err
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, err
+	}
+	var results []map[string]any
+	for rows.Next() {
+		values := make([]any, len(columns))
+		pointers := make([]any, len(columns))
+		for i := range values {
+			pointers[i] = &values[i]
+		}
+
+		if err := rows.Scan(pointers...); err != nil {
+			return nil, err
+		}
+
+		m := make(map[string]any)
+		for i, colName := range columns {
+			m[colName] = values[i]
+		}
+		results = append(results, m)
+	}
+	if err = rows.Err(); err != nil {
+		log.Printf("Rows quering failed: %v\n", err)
+		return nil, err
+	}
+	return results, err
+
+}
+
+type treeEdgeRow struct {
+	parentSchema, parentTable string
+	childSchema, childTable   string
+	constraintName            string
+	fromColumn, toColumn      string
+	direction                 string
+	depth                     int
+}
+
+func (conn *Connection) GetRelationTree(schema, table string, maxDepth int) (*RelationNode, error) {
+	if maxDepth > 5 {
+		maxDepth = 5
+	}
+	sqlStr := conn.connector.GetRelationTreeSQL()
+	if sqlStr == "" {
+		return &RelationNode{Schema: schema, Table: table}, nil
+	}
+	rows, err := conn.connector.GetPool().Query(sqlStr, schema, table, maxDepth)
+	if err != nil {
+		log.Printf("Relation tree query failed: %v\n", err)
+		return nil, err
+	}
+	defer rows.Close()
+
+	var edges []treeEdgeRow
+	for rows.Next() {
+		var e treeEdgeRow
+		err = rows.Scan(&e.parentSchema, &e.parentTable, &e.childSchema, &e.childTable,
+			&e.constraintName, &e.fromColumn, &e.toColumn, &e.direction, &e.depth)
+		if err != nil {
+			break
+		}
+		edges = append(edges, e)
+	}
+	if err != nil {
+		log.Printf("Relation tree scanning failed: %v\n", err)
+		return nil, err
+	}
+	return assembleRelationTree(schema, table, edges), nil
+}
+
+func assembleRelationTree(schema, table string, edges []treeEdgeRow) *RelationNode {
+	root := &RelationNode{Schema: schema, Table: table}
+	rootKey := strings.ToLower(schema) + "." + strings.ToLower(table)
+	nodeMap := map[string]*RelationNode{rootKey: root}
+
+	for _, e := range edges {
+		parentKey := strings.ToLower(e.parentSchema) + "." + strings.ToLower(e.parentTable)
+		parent, ok := nodeMap[parentKey]
+		if !ok {
+			continue
+		}
+
+		childKey := strings.ToLower(e.childSchema) + "." + strings.ToLower(e.childTable)
+		child, exists := nodeMap[childKey]
+		if !exists {
+			child = &RelationNode{Schema: e.childSchema, Table: e.childTable}
+			nodeMap[childKey] = child
+		}
+
+		// Always add the edge — multiple FK constraints between the same table pair
+		// are all represented; cycles are already prevented by the SQL path array.
+		parent.Relations = append(parent.Relations, &RelationEdge{
+			ConstraintName: e.constraintName,
+			FromColumn:     e.fromColumn,
+			ToColumn:       e.toColumn,
+			Direction:      e.direction,
+			Node:           child,
+		})
+	}
+	return root
+}
+
 /* not a connection member */
 func GetVersion(connector Connector) string {
 	version := "not defined"
 	sqlStr := connector.GetVersionSQL()
 	rows, err := connector.GetPool().Query(sqlStr)
-	defer rows.Close()
 	if err != nil {
 		log.Printf("Version queuing failed: %v\n", err)
+		return version
 	}
-	if rows.Next() {
-		err = rows.Scan(&version)
-	}
+	defer rows.Close()
 	if err != nil {
 		log.Printf("Version quering failed: %v\n", err)
 	}
