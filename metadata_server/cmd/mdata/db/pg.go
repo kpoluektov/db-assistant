@@ -95,7 +95,7 @@ func (conn PGConnector) GetRelationTreeSQL() string {
 	// pg_catalog is always accessible and handles multi-column FKs correctly via LATERAL unnest
 	// with WITH ORDINALITY to preserve the column-position pairing.
 	return `WITH RECURSIVE
-params(p_schema, p_table, p_depth) AS (VALUES ($1::text, $2::text, $3::int)),
+params(p_schema, p_table, p_depth) AS (VALUES ($1::text COLLATE "C", $2::text COLLATE "C", $3::int)),
 fk_edges AS (
     SELECT
         ns1.nspname::text  AS from_schema,
