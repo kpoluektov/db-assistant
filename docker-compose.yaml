@@ -2,7 +2,7 @@ version: '3.7'
 
 services: 
   web:    
-    image: metadata_server:0.6
+    image: metadata_server:0.7
     build: ./metadata_server
     ports:     
       - "8080:8080"   
@@ -21,7 +21,7 @@ services:
       - /var/opt/root.crt:/app/root.crt:ro
 
   mcp:   
-    image: mcp_server:0.6  
+    image: mcp_server:0.7
     build: ./mcp_server
     ports:
       - "8081:8081"
@@ -34,7 +34,7 @@ services:
     restart: on-failure
 
   agent:
-    image: flask_agent:0.6
+    image: flask_agent:0.7
     build: ./flask_agent
     ports:
       - "8083:8083"
