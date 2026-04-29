@@ -28,6 +28,13 @@ yLogger().initFile(settings.yandex.LOG_FILE_NAME)
 
 if settings.yandex.DEBUG:
     os.environ["OPENAI_LOG"] = "debug"
+    _debug_handler = logging.StreamHandler(sys.stdout)
+    _debug_handler.setLevel(logging.DEBUG)
+    for _name in ("openai", "openai.agents", "httpx"):
+        _lgr = logging.getLogger(_name)
+        _lgr.setLevel(logging.DEBUG)
+        if not _lgr.handlers:
+            _lgr.addHandler(_debug_handler)
 
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 
