@@ -19,6 +19,7 @@ class YandexSettings(BaseModel):
     METADATA_SCHEMA: str = "public"
     MAX_TURNS: int = 25
     SQL_PRESETS: list[dict[str, str]] = []
+    DEBUG: bool = False
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import sys
 import traceback
 from contextlib import asynccontextmanager
@@ -24,6 +25,9 @@ _log.addHandler(logging.StreamHandler(sys.stdout))
 
 settings = Settings(_env_file='.env', _env_file_encoding='utf-8')
 yLogger().initFile(settings.yandex.LOG_FILE_NAME)
+
+if settings.yandex.DEBUG:
+    os.environ["OPENAI_LOG"] = "debug"
 
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 
