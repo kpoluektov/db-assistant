@@ -100,7 +100,7 @@ async def receive_message(sid, data):
 async def _handle_message(sid: str, data: dict) -> None:
     try:
         hooks = ExampleHooks(sio=sio, sid=sid)
-        async with YandexAssistant(settings, sid, hooks=hooks) as assistant:
+        async with YandexAssistant(settings, sid, hooks=hooks, sio=sio) as assistant:
             resp = await assistant.one_shot(data.get('message'))
     except Exception as e:
         _log.error(f"Agent error: {e}\n{traceback.format_exc()}")

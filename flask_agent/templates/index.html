@@ -285,6 +285,29 @@
     const sqlStatus  = document.getElementById('sql-status');
     const sqlResults = document.getElementById('sql-results');
 
+    // Agent auto-run: mirror wide_sql calls into the SQL panel
+    socket.on('agent_sql_start', (data) => {
+      sqlInput.value = data.sql;
+      sqlResults.innerHTML = '<div class="sql-spinner"><span></span><span></span><span></span></div>';
+      sqlStatus.textContent = 'Агент выполняет…';
+      sqlStatus.className = '';
+      document.getElementById('sql-presets').querySelectorAll('.preset-btn')
+        .forEach(b => b.classList.remove('active'));
+    });
+
+    socket.on('agent_sql_end', (data) => {
+      if (data.error) {
+        sqlStatus.textContent = `Ошибка (${data.elapsed}с)`;
+        sqlStatus.className = 'status-error';
+        sqlResults.innerHTML = `<div class="sql-error">${escapeHtml(data.error)}</div>`;
+      } else {
+        sqlStatus.textContent =
+          `${data.count} ${plural(data.count, 'строка', 'строки', 'строк')} · ${data.elapsed}с`;
+        sqlStatus.className = 'status-ok';
+        renderTable(data.rows);
+      }
+    });
+
     function escapeHtml(str) {
       return String(str ?? '')
         .replace(/&/g, '&amp;')

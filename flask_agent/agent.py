@@ -1,5 +1,6 @@
 import json
 import logging
+import time
 from contextlib import AsyncExitStack
 
 from agents.mcp import MCPServerSse
@@ -20,15 +21,43 @@ _DATA_TOOLS: frozenset[str] = frozenset({"run_wide_sql"})
 
 
 class _FilteredMCP(MCPServerSse):
-    """MCPServerSse that exposes only the tools listed in *allowed*."""
+    """MCPServerSse that exposes only the tools in *allowed*.
+    When sio/sid are provided, wide_sql calls are mirrored to the browser."""
 
-    def __init__(self, *args, allowed: frozenset[str], **kwargs):
+    def __init__(self, *args, allowed: frozenset[str], sio=None, sid=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._allowed = allowed
+        self._sio = sio
+        self._sid = sid
 
     async def list_tools(self, run_context=None, agent=None):
         all_tools = await super().list_tools(run_context, agent)
         return [t for t in all_tools if t.name in self._allowed]
+
+    async def call_tool(self, tool_name: str, arguments: dict | None):
+        if tool_name == "run_wide_sql" and self._sio and self._sid:
+            sql = (arguments or {}).get("sql", "")
+            await self._sio.emit("agent_sql_start", {"sql": sql}, to=self._sid)
+            t0 = time.monotonic()
+            result = await super().call_tool(tool_name, arguments)
+            elapsed = round(time.monotonic() - t0, 2)
+            try:
+                rows = json.loads(result.content[0].text)
+                if isinstance(rows, list):
+                    await self._sio.emit(
+                        "agent_sql_end",
+                        {"rows": rows, "count": len(rows), "elapsed": elapsed},
+                        to=self._sid,
+                    )
+                else:
+                    raise ValueError(result.content[0].text)
+            except Exception as exc:
+                text = str(exc) if not isinstance(exc, ValueError) else exc.args[0]
+                await self._sio.emit(
+                    "agent_sql_end", {"error": text, "elapsed": elapsed}, to=self._sid
+                )
+            return result
+        return await super().call_tool(tool_name, arguments)
 
 
 def _null_string(val) -> str:
@@ -154,8 +183,10 @@ def _load_schema_context() -> str:
 
 
 class YandexAssistant:
-    def __init__(self, settings, sid, hooks=None):
+    def __init__(self, settings, sid, hooks=None, sio=None):
         self.settings = settings
+        self._sio = sio
+        self._sid = sid
         self._client = AsyncOpenAI(
             base_url=self.settings.yandex.URL,
             api_key=self.settings.yandex.AUTH,
@@ -190,6 +221,8 @@ class YandexAssistant:
                 name="DataMCP",
                 params=mcp_params,
                 allowed=_DATA_TOOLS,
+                sio=self._sio,
+                sid=self._sid,
                 cache_tools_list=True,
                 client_session_timeout_seconds=30,
             )
