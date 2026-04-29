@@ -16,6 +16,7 @@ class YandexSettings(BaseModel):
     PORT: int
     MASKING_INSTRUCTION: str
     MASKING_INDEX_ID: str
+    DATA_INSTRUCTION: str
     WAIT_TIMEOUT: int
     METADATA_SCHEMA: str = "public"
     MAX_TURNS: int = 25

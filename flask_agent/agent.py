@@ -1,11 +1,9 @@
-import asyncio
 import json
 import logging
-import os
 from contextlib import AsyncExitStack
 
 from agents.mcp import MCPServerSse
-from agents import AsyncOpenAI, Agent, Runner, RunConfig, ModelSettings, FileSearchTool, handoff, SQLiteSession
+from agents import AsyncOpenAI, Agent, Runner, RunConfig, ModelSettings, handoff, SQLiteSession
 from utils.config import Settings
 from utils.model_provider import CustomModelProvider
 from agents.extensions import handoff_filters
@@ -13,6 +11,24 @@ from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 
 AGENT_MD_PATH = "AGENT.md"
 _log = logging.getLogger("db_assistant")
+
+_METADATA_TOOLS: frozenset[str] = frozenset({
+    "get_metadata", "get_table_list", "get_statistics",
+    "get_indexes", "get_db_parameters", "get_relationships",
+})
+_DATA_TOOLS: frozenset[str] = frozenset({"run_wide_sql"})
+
+
+class _FilteredMCP(MCPServerSse):
+    """MCPServerSse that exposes only the tools listed in *allowed*."""
+
+    def __init__(self, *args, allowed: frozenset[str], **kwargs):
+        super().__init__(*args, **kwargs)
+        self._allowed = allowed
+
+    async def list_tools(self):
+        # super() handles its own cache; we just filter the result.
+        return [t for t in await super().list_tools() if t.name in self._allowed]
 
 
 def _null_string(val) -> str:
@@ -97,55 +113,55 @@ class YandexAssistant:
         self._exit_stack = AsyncExitStack()
         self._hooks = hooks
         self._session = SQLiteSession(session_id=sid, db_path="chat.db")
-        self._getMetadata = None
+        self._metaMCP = None
+        self._dataMCP = None
         self._assistant = None
         self._metaAssistant = None
-        self._maskingAssistant = None
+        self._dataAssistant = None
 
     async def __aenter__(self):
-        self._getMetadata = await self._exit_stack.enter_async_context(
-            MCPServerSse(
-                name="GetMetadata",
-                params={
-                    "url": self.settings.yandex.GET_INFO_MCP_URL,
-                    "timeout": 60,
-                },
+        mcp_params = {"url": self.settings.yandex.GET_INFO_MCP_URL, "timeout": 60}
+
+        self._metaMCP = await self._exit_stack.enter_async_context(
+            _FilteredMCP(
+                name="MetadataMCP",
+                params=mcp_params,
+                allowed=_METADATA_TOOLS,
                 cache_tools_list=True,
                 client_session_timeout_seconds=30,
             )
         )
+        self._dataMCP = await self._exit_stack.enter_async_context(
+            _FilteredMCP(
+                name="DataMCP",
+                params=mcp_params,
+                allowed=_DATA_TOOLS,
+                cache_tools_list=True,
+                client_session_timeout_seconds=30,
+            )
+        )
+
         schema_context = _load_schema_context()
+        instruction_suffix = f"\n\n{schema_context}" if schema_context else ""
+
         self._metaAssistant = Agent(
             name="MetadataAgent",
-            instructions=self.settings.yandex.METADATA_INSTRUCTION 
-             + (f"\n\n{schema_context}" if schema_context else ""),
-            mcp_servers=[self._getMetadata],
+            instructions=self.settings.yandex.METADATA_INSTRUCTION + instruction_suffix,
+            mcp_servers=[self._metaMCP],
         )
-        self._maskingAssistant = Agent(
-            name="DataMaskingAgent",
-            instructions=self.settings.yandex.MASKING_INSTRUCTION,
-            tools=[
-                FileSearchTool(
-                    max_num_results=5,
-                    vector_store_ids=[self.settings.yandex.MASKING_INDEX_ID],
-                )
-            ],
+        self._dataAssistant = Agent(
+            name="DataAgent",
+            instructions=self.settings.yandex.DATA_INSTRUCTION + instruction_suffix,
+            mcp_servers=[self._dataMCP],
         )
-        schema_context = _load_schema_context()
         self._assistant = Agent(
             name="AssistantAgent",
             instructions=(
                 f"{RECOMMENDED_PROMPT_PREFIX}\n{self.settings.yandex.ASSISTANT_INSTRUCTION}"
             ),
             handoffs=[
-                handoff(
-                    agent=self._maskingAssistant,
-                    input_filter=handoff_filters.remove_all_tools,
-                ),
-                handoff(
-                    agent=self._metaAssistant,
-                    input_filter=handoff_filters.remove_all_tools,
-                ),
+                handoff(agent=self._dataAssistant, input_filter=handoff_filters.remove_all_tools),
+                handoff(agent=self._metaAssistant, input_filter=handoff_filters.remove_all_tools),
             ],
             model_settings=ModelSettings(tool_choice="auto", reasoning={"effort": "low"}),
         )
