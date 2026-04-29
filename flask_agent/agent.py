@@ -85,6 +85,60 @@ async def initialize_schema(settings) -> None:
                 lines.append(f"| {col['name']} | {col['type']} | {col_desc} |")
             lines.append("")
 
+            # Indexes
+            try:
+                idx_result = await mcp.call_tool(
+                    "get_indexes", {"schemaName": schema, "tableName": table_name}
+                )
+                indexes = json.loads(idx_result.content[0].text).get("indexes") or []
+                if indexes:
+                    lines.append("**Indexes:**")
+                    lines.append("")
+                    lines.append("| Index | Columns | Unique | PK |")
+                    lines.append("|-------|---------|--------|----|")
+                    for idx in indexes:
+                        cols = ", ".join(c["name"] for c in (idx.get("columns") or []))
+                        lines.append(
+                            f"| {idx['name']} | {cols} "
+                            f"| {'✓' if idx.get('unique') else ''} "
+                            f"| {'✓' if idx.get('is_pk') else ''} |"
+                        )
+                    lines.append("")
+            except Exception as e:
+                _log.warning("get_indexes failed for %s: %s", table_name, e)
+
+            # FK relationships (depth=1)
+            try:
+                rel_result = await mcp.call_tool(
+                    "get_relationships",
+                    {"schemaName": schema, "tableName": table_name, "depth": 1},
+                )
+                relations = json.loads(rel_result.content[0].text).get("relations") or []
+                outgoing = [r for r in relations if r.get("direction") == "outgoing"]
+                incoming = [r for r in relations if r.get("direction") == "incoming"]
+                if outgoing:
+                    lines.append("**Foreign keys:**")
+                    lines.append("")
+                    lines.append("| Column | → Table | → Column |")
+                    lines.append("|--------|---------|----------|")
+                    for rel in outgoing:
+                        nd = rel.get("node", {})
+                        ref = f"{nd.get('schema', schema)}.{nd.get('table', '?')}"
+                        lines.append(f"| {rel.get('from_column', '?')} | {ref} | {rel.get('to_column', '?')} |")
+                    lines.append("")
+                if incoming:
+                    lines.append("**Referenced by:**")
+                    lines.append("")
+                    lines.append("| Table | Column | → Column |")
+                    lines.append("|-------|--------|----------|")
+                    for rel in incoming:
+                        nd = rel.get("node", {})
+                        ref = f"{nd.get('schema', schema)}.{nd.get('table', '?')}"
+                        lines.append(f"| {ref} | {rel.get('from_column', '?')} | {rel.get('to_column', '?')} |")
+                    lines.append("")
+            except Exception as e:
+                _log.warning("get_relationships failed for %s: %s", table_name, e)
+
         content = "\n".join(lines)
         with open(AGENT_MD_PATH, "w", encoding="utf-8") as f:
             f.write(content)
