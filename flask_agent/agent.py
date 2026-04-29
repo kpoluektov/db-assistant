@@ -26,9 +26,9 @@ class _FilteredMCP(MCPServerSse):
         super().__init__(*args, **kwargs)
         self._allowed = allowed
 
-    async def list_tools(self):
-        # super() handles its own cache; we just filter the result.
-        return [t for t in await super().list_tools() if t.name in self._allowed]
+    async def list_tools(self, run_context=None, agent=None):
+        all_tools = await super().list_tools(run_context, agent)
+        return [t for t in all_tools if t.name in self._allowed]
 
 
 def _null_string(val) -> str:
