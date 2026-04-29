@@ -13,6 +13,8 @@ from agents.extensions.handoff_prompt import RECOMMENDED_PROMPT_PREFIX
 AGENT_MD_PATH = "AGENT.md"
 _log = logging.getLogger("db_assistant")
 
+_MODEL_SETTINGS = ModelSettings(tool_choice="auto", reasoning={"effort": "low"})
+
 _METADATA_TOOLS: frozenset[str] = frozenset({
     "get_metadata", "get_table_list", "get_statistics",
     "get_indexes", "get_db_parameters", "get_relationships",
@@ -235,11 +237,13 @@ class YandexAssistant:
             name="MetadataAgent",
             instructions=self.settings.yandex.METADATA_INSTRUCTION + instruction_suffix,
             mcp_servers=[self._metaMCP],
+            model_settings=_MODEL_SETTINGS,
         )
         self._dataAssistant = Agent(
             name="DataAgent",
             instructions=self.settings.yandex.DATA_INSTRUCTION + instruction_suffix,
             mcp_servers=[self._dataMCP],
+            model_settings=_MODEL_SETTINGS,
         )
         self._assistant = Agent(
             name="AssistantAgent",
@@ -250,7 +254,7 @@ class YandexAssistant:
                 handoff(agent=self._dataAssistant, input_filter=handoff_filters.remove_all_tools),
                 handoff(agent=self._metaAssistant, input_filter=handoff_filters.remove_all_tools),
             ],
-            model_settings=ModelSettings(tool_choice="auto", reasoning={"effort": "low"}),
+            model_settings=_MODEL_SETTINGS,
         )
         return self
 
