@@ -144,7 +144,8 @@ async def initialize_schema(settings) -> None:
                     "get_relationships",
                     {"schemaName": schema, "tableName": table_name, "depth": 1},
                 )
-                relations = json.loads(rel_result.content[0].text).get("relations") or []
+                rel_data = json.loads(rel_result.content[0].text)
+                relations = (rel_data.get("tree") or rel_data).get("relations") or []
                 outgoing = [r for r in relations if r.get("direction") == "outgoing"]
                 incoming = [r for r in relations if r.get("direction") == "incoming"]
                 if outgoing:
