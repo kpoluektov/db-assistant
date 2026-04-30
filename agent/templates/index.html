@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DB Assistant</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Header ──────────────────────────────────────── -->
+    <header id="header">
+      <div id="header-inner">
+        <svg id="logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <ellipse cx="16" cy="9" rx="12" ry="5" stroke="currentColor" stroke-width="2"/>
+          <path d="M4 9v7c0 2.76 5.37 5 12 5s12-2.24 12-5V9" stroke="currentColor" stroke-width="2"/>
+          <path d="M4 16v7c0 2.76 5.37 5 12 5s12-2.24 12-5v-7" stroke="currentColor" stroke-width="2"/>
+        </svg>
+        <span id="header-title">DB Assistant</span>
+      </div>
+      <div id="status-dot" class="dot-connecting" title="Подключение..."></div>
+    </header>
+
+    <!-- ── Split panels ────────────────────────────────── -->
+    <div id="panels">
+
+      <!-- Left: Chat -->
+      <section id="chat-panel">
+        <main id="messages"></main>
+        <footer id="input-area">
+          <textarea id="message-input" rows="1"
+                    placeholder="Введите вопрос по базе данных…"
+                    autocomplete="off"></textarea>
+          <button id="send-btn" disabled title="Отправить">
+            <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M22 2L11 13" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </button>
+        </footer>
+      </section>
+
+      <!-- Drag handle -->
+      <div id="panel-divider" title="Перетащите для изменения ширины"></div>
+
+      <!-- Right: SQL console -->
+      <section id="sql-panel">
+
+        <div id="sql-toolbar">
+          <span class="panel-title">
+            <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" width="14" height="14">
+              <path d="M3 5h14M3 10h8M3 15h5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+            SQL консоль
+          </span>
+          <span id="sql-status"></span>
+        </div>
+
+        <div id="sql-presets"></div>
+
+        <div id="sql-editor-wrap">
+          <textarea id="sql-input" spellcheck="false"
+                    placeholder="SELECT * FROM public.orders LIMIT 10"></textarea>
+        </div>
+
+        <div id="sql-actions">
+          <button id="sql-run-btn">
+            <svg viewBox="0 0 16 16" fill="currentColor" xmlns="http://www.w3.org/2000/svg" width="12" height="12">
+              <path d="M3 2.5l10 5.5-10 5.5V2.5z"/>
+            </svg>
+            Выполнить
+          </button>
+          <span class="sql-hint">Ctrl+Enter</span>
+        </div>
+
+        <div id="sql-results">
+          <div class="sql-placeholder">Результаты запроса появятся здесь</div>
+        </div>
+
+      </section>
+    </div><!-- /panels -->
+  </div><!-- /app -->
+
+  <script>
+    // ── Marked config ───────────────────────────────────────────────
+    marked.setOptions({
+      highlight: (code, lang) => {
+        const language = hljs.getLanguage(lang) ? lang : 'sql';
+        return hljs.highlight(code, { language }).value;
+      },
+      breaks: true,
+      gfm: true,
+    });
+
+    // ── DOM refs ────────────────────────────────────────────────────
+    const messages   = document.getElementById('messages');
+    const input      = document.getElementById('message-input');
+    const sendBtn    = document.getElementById('send-btn');
+    const statusDot  = document.getElementById('status-dot');
+
+    // ── State ───────────────────────────────────────────────────────
+    let waitingForReply = false;
+    let typingEl        = null;
+    let userScrolled    = false;
+
+    messages.addEventListener('scroll', () => {
+      const nearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80;
+      userScrolled = !nearBottom;
+    }, { passive: true });
+
+    // ── Reasoning block ─────────────────────────────────────────────
+    let reasoningEl = null;
+    let reasoningSteps = 0;
+
+    const STEP_LABELS = {
+      agent_start: (d) => `Агент <b>${d.agent}</b> запущен`,
+      agent_end:   (d) => `Агент <b>${d.agent}</b> завершил работу`,
+      llm_start:   (d) => `<b>${d.agent}</b>: запрос к LLM…`,
+      llm_end:     (d) => `<b>${d.agent}</b>: ответ LLM получен`,
+      tool_start:  (d) => `Вызов инструмента <b>${d.tool}</b>…`,
+      tool_end:    (d) => `Инструмент <b>${d.tool}</b> вернул результат`,
+      handoff:     (d) => `Передача управления: <b>${d.from_agent}</b> → <b>${d.to_agent}</b>`,
+    };
+
+    const STEP_ICONS = {
+      agent_start: '🤖', agent_end: '✓',
+      llm_start:   '💭', llm_end:   '✓',
+      tool_start:  '⚙',  tool_end:  '✓',
+      handoff:     '→',
+    };
+
+    function createReasoningBlock() {
+      reasoningEl = document.createElement('div');
+      reasoningEl.className = 'reasoning open';
+
+      const header = document.createElement('div');
+      header.className = 'reasoning-header';
+      header.innerHTML =
+        `<span class="reasoning-title">Рассуждения</span>
+         <span class="reasoning-count">0 шагов</span>
+         <span class="reasoning-chevron">▾</span>`;
+      header.addEventListener('click', () => {
+        header.closest('.reasoning').classList.toggle('open');
+      });
+
+      const body = document.createElement('div');
+      body.className = 'reasoning-body';
+
+      reasoningEl.appendChild(header);
+      reasoningEl.appendChild(body);
+      messages.appendChild(reasoningEl);
+      reasoningSteps = 0;
+      scrollToBottom();
+    }
+
+    function addReasoningStep(type, data) {
+      if (!reasoningEl) return;
+      const label = STEP_LABELS[type] ? STEP_LABELS[type](data) : type;
+      const icon  = STEP_ICONS[type] || '·';
+      const step  = document.createElement('div');
+      step.className = 'reasoning-step step-' + type;
+      step.innerHTML = `<span class="step-icon">${icon}</span><span class="step-text">${label}</span>`;
+      reasoningEl.querySelector('.reasoning-body').appendChild(step);
+      reasoningSteps++;
+      reasoningEl.querySelector('.reasoning-count').textContent = reasoningSteps + ' ' + plural(reasoningSteps, 'шаг', 'шага', 'шагов');
+      scrollToBottom();
+    }
+
+    function collapseReasoning() {
+      if (!reasoningEl) return;
+      reasoningEl.classList.remove('open');
+      reasoningEl = null;
+    }
+
+    function plural(n, one, few, many) {
+      const mod10 = n % 10, mod100 = n % 100;
+      if (mod10 === 1 && mod100 !== 11) return one;
+      if (mod10 >= 2 && mod10 <= 4 && (mod100 < 10 || mod100 >= 20)) return few;
+      return many;
+    }
+
+    // ── Socket ──────────────────────────────────────────────────────
+    const socket = io();
+
+    socket.on('connect', () => {
+      socket.emit('connected', { nickname: 'user' });
+      setStatus('connected');
+      sendBtn.disabled = false;
+    });
+
+    socket.on('disconnect', () => {
+      setStatus('disconnected');
+      sendBtn.disabled = true;
+    });
+
+    socket.on('agent_step', (data) => {
+      if (!reasoningEl) createReasoningBlock();
+      addReasoningStep(data.type, data);
+    });
+
+    socket.on('server_message', (data) => {
+      removeTyping();
+      if (data.nickname === 'assistant') {
+        collapseReasoning();
+        appendMessage('assistant', data.message);
+        waitingForReply = false;
+        sendBtn.disabled = false;
+        input.disabled   = false;
+        input.focus();
+      }
+      // user echo — already shown optimistically, skip
+    });
+
+    // ── Chat helpers ────────────────────────────────────────────────
+    function setStatus(state) {
+      statusDot.className = 'dot-' + state;
+      statusDot.title = { connected: 'Подключено', disconnected: 'Нет связи', connecting: 'Подключение…' }[state] || '';
+    }
+
+    function appendMessage(role, raw) {
+      const wrap = document.createElement('div');
+      wrap.className = 'msg msg-' + role;
+
+      const bubble = document.createElement('div');
+      bubble.className = 'bubble';
+
+      if (role === 'assistant') {
+        bubble.innerHTML = marked.parse(raw || '');
+        bubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+      } else {
+        bubble.textContent = raw;
+      }
+
+      wrap.appendChild(bubble);
+      messages.appendChild(wrap);
+      scrollToBottom();
+    }
+
+    function showTyping() {
+      if (typingEl) return;
+      typingEl = document.createElement('div');
+      typingEl.className = 'msg msg-assistant';
+      typingEl.innerHTML = '<div class="bubble typing"><span></span><span></span><span></span></div>';
+      messages.appendChild(typingEl);
+      scrollToBottom();
+    }
+
+    function removeTyping() {
+      if (typingEl) { typingEl.remove(); typingEl = null; }
+    }
+
+    function scrollToBottom() {
+      if (!userScrolled) messages.scrollTop = messages.scrollHeight;
+    }
+
+    function sendMessage() {
+      const text = input.value.trim();
+      if (!text || waitingForReply) return;
+
+      userScrolled = false;
+      reasoningEl = null;
+      appendMessage('user', text);
+      socket.emit('client_message', { nickname: 'user', message: text });
+
+      input.value     = '';
+      input.style.height = '';
+      waitingForReply = true;
+      sendBtn.disabled = true;
+      input.disabled   = true;
+      showTyping();
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+
+    input.addEventListener('input', () => {
+      input.style.height = '';
+      input.style.height = Math.min(input.scrollHeight, 160) + 'px';
+    });
+
+    // ── SQL console ──────────────────────────────────────────────────
+    const sqlInput   = document.getElementById('sql-input');
+    const sqlRunBtn  = document.getElementById('sql-run-btn');
+    const sqlStatus  = document.getElementById('sql-status');
+    const sqlResults = document.getElementById('sql-results');
+
+    // Agent auto-run: mirror wide_sql calls into the SQL panel
+    socket.on('agent_sql_start', (data) => {
+      sqlInput.value = data.sql;
+      sqlResults.innerHTML = '<div class="sql-spinner"><span></span><span></span><span></span></div>';
+      sqlStatus.textContent = 'Агент выполняет…';
+      sqlStatus.className = '';
+      document.getElementById('sql-presets').querySelectorAll('.preset-btn')
+        .forEach(b => b.classList.remove('active'));
+    });
+
+    socket.on('agent_sql_end', (data) => {
+      if (data.error) {
+        sqlStatus.textContent = `Ошибка (${data.elapsed}с)`;
+        sqlStatus.className = 'status-error';
+        sqlResults.innerHTML = `<div class="sql-error">${escapeHtml(data.error)}</div>`;
+      } else {
+        sqlStatus.textContent =
+          `${data.count} ${plural(data.count, 'строка', 'строки', 'строк')} · ${data.elapsed}с`;
+        sqlStatus.className = 'status-ok';
+        renderTable(data.rows);
+      }
+    });
+
+    function escapeHtml(str) {
+      return String(str ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function renderTable(rows) {
+      if (!rows.length) {
+        sqlResults.innerHTML = '<div class="sql-empty">Запрос выполнен, строк нет</div>';
+        return;
+      }
+      const cols = Object.keys(rows[0]);
+      let html = '<div class="sql-table-wrap"><table><thead><tr>';
+      cols.forEach(c => { html += `<th>${escapeHtml(c)}</th>`; });
+      html += '</tr></thead><tbody>';
+      rows.forEach(row => {
+        html += '<tr>';
+        cols.forEach(c => {
+          const val = escapeHtml(row[c]);
+          html += `<td title="${val}">${val}</td>`;
+        });
+        html += '</tr>';
+      });
+      html += '</tbody></table></div>';
+      sqlResults.innerHTML = html;
+    }
+
+    async function runSQL() {
+      const sql = sqlInput.value.trim();
+      if (!sql) return;
+
+      sqlRunBtn.disabled = true;
+      sqlStatus.textContent = 'Выполняется…';
+      sqlStatus.className = '';
+      sqlResults.innerHTML = '<div class="sql-spinner"><span></span><span></span><span></span></div>';
+
+      const t0 = Date.now();
+      try {
+        const resp = await fetch('/api/sql', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sql }),
+        });
+        const data = await resp.json();
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+
+        if (data.error) {
+          sqlStatus.textContent = `Ошибка (${elapsed}с)`;
+          sqlStatus.className = 'status-error';
+          sqlResults.innerHTML = `<div class="sql-error">${escapeHtml(data.error)}</div>`;
+        } else {
+          sqlStatus.textContent = `${data.count} ${plural(data.count, 'строка', 'строки', 'строк')} · ${elapsed}с`;
+          sqlStatus.className = 'status-ok';
+          renderTable(data.rows);
+        }
+      } catch (e) {
+        const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+        sqlStatus.textContent = `Сетевая ошибка (${elapsed}с)`;
+        sqlStatus.className = 'status-error';
+        sqlResults.innerHTML = `<div class="sql-error">${escapeHtml(e.message)}</div>`;
+      } finally {
+        sqlRunBtn.disabled = false;
+      }
+    }
+
+    // ── SQL presets ──────────────────────────────────────────────────
+    (async function loadPresets() {
+      try {
+        const presets = await fetch('/api/sql-presets').then(r => r.json());
+        if (!presets.length) return;
+        const bar = document.getElementById('sql-presets');
+        presets.forEach(p => {
+          const btn = document.createElement('button');
+          btn.className = 'preset-btn';
+          btn.textContent = p.description;
+          btn.addEventListener('click', () => {
+            sqlInput.value = p.sql;
+            bar.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            sqlInput.focus();
+          });
+          bar.appendChild(btn);
+        });
+      } catch {}
+    })();
+
+    sqlRunBtn.addEventListener('click', runSQL);
+
+    sqlInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        runSQL();
+      }
+    });
+
+    // ── Resizable divider ────────────────────────────────────────────
+    (function () {
+      const divider   = document.getElementById('panel-divider');
+      const chatPanel = document.getElementById('chat-panel');
+      const sqlPanel  = document.getElementById('sql-panel');
+      const panels    = document.getElementById('panels');
+      let dragging = false;
+
+      divider.addEventListener('mousedown', (e) => {
+        dragging = true;
+        divider.classList.add('dragging');
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        const rect  = panels.getBoundingClientRect();
+        const divW  = divider.offsetWidth;
+        const total = rect.width - divW;
+        let chatW   = e.clientX - rect.left;
+        chatW = Math.max(total * 0.2, Math.min(total * 0.8, chatW));
+        chatPanel.style.flex = `0 0 ${chatW}px`;
+        sqlPanel.style.flex  = '1 1 0';
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (!dragging) return;
+        dragging = false;
+        divider.classList.remove('dragging');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      });
+    })();
+  </script>
+</body>
+</html>

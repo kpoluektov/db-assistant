@@ -13,13 +13,14 @@ class YandexSettings(BaseModel):
     MODEL: str
     GET_INFO_MCP_URL:str
     LOG_FILE_NAME: str
-    SECRET_KEY: str
     PORT: int
-    MASKING_INSTRUCTION: str
-    MASKING_INDEX_ID: str
+    DATA_INSTRUCTION: str
     WAIT_TIMEOUT: int
     METADATA_SCHEMA: str = "public"
     MAX_TURNS: int = 25
+    SESSION_MAX_HISTORY: int = 0
+    SQL_PRESETS: list[dict[str, str]] = []
+    DEBUG: bool = False
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
