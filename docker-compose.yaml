@@ -34,8 +34,8 @@ services:
     restart: on-failure
 
   agent:
-    image: flask_agent:0.7
-    build: ./flask_agent
+    image: agent:0.7
+    build: ./agent
     ports:
       - "8083:8083"
     networks:
