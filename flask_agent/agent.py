@@ -15,6 +15,24 @@ _log = logging.getLogger("db_assistant")
 
 _MODEL_SETTINGS = ModelSettings(tool_choice="auto", reasoning={"effort": "low"})
 
+
+class _CompactedSession(SQLiteSession):
+    """SQLiteSession that caps the in-context history to the last *max_history* items.
+
+    Full history is preserved in the database; only the sliding window is sent
+    to the model on each turn. Set max_history=0 to disable compaction.
+    """
+
+    def __init__(self, session_id: str, db_path: str, max_history: int):
+        super().__init__(session_id=session_id, db_path=db_path)
+        self._max_history = max_history or None  # None → no limit (SQLiteSession default)
+
+    async def get_items(self, limit: int | None = None):
+        effective_limit = limit  # honour explicit caller limit if provided
+        if effective_limit is None and self._max_history is not None:
+            effective_limit = self._max_history
+        return await super().get_items(limit=effective_limit)
+
 _METADATA_TOOLS: frozenset[str] = frozenset({
     "get_metadata", "get_table_list", "get_statistics",
     "get_indexes", "get_db_parameters", "get_relationships",
@@ -200,7 +218,11 @@ class YandexAssistant:
         )
         self._exit_stack = AsyncExitStack()
         self._hooks = hooks
-        self._session = SQLiteSession(session_id=sid, db_path="chat.db")
+        self._session = _CompactedSession(
+            session_id=sid,
+            db_path="chat.db",
+            max_history=settings.yandex.SESSION_MAX_HISTORY,
+        )
         self._metaMCP = None
         self._dataMCP = None
         self._assistant = None
