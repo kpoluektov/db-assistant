@@ -10,7 +10,7 @@
         href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/sql.min.js"></script>
-  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="static/css/style.css">
 </head>
 <body>
   <div id="app">
@@ -187,7 +187,9 @@
     }
 
     // ── Socket ──────────────────────────────────────────────────────
-    const socket = io();
+    const basePath = window.location.pathname.replace(/\/$/, '');
+    const socketPath = basePath ? `${basePath}/socket.io` : '/socket.io';
+    const socket = io({ path: socketPath });
 
     socket.on('connect', () => {
       socket.emit('connected', { nickname: 'user' });
@@ -360,7 +362,7 @@
 
       const t0 = Date.now();
       try {
-        const resp = await fetch('/api/sql', {
+        const resp = await fetch('api/sql', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sql }),
@@ -390,7 +392,7 @@
     // ── SQL presets ──────────────────────────────────────────────────
     (async function loadPresets() {
       try {
-        const presets = await fetch('/api/sql-presets').then(r => r.json());
+        const presets = await fetch('api/sql-presets').then(r => r.json());
         if (!presets.length) return;
         const bar = document.getElementById('sql-presets');
         presets.forEach(p => {
