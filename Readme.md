@@ -1,91 +1,91 @@
-**English** | [Русский](README.ru.md)
+[English](README.en.md) | **Русский**
 
-# DB Assistant — Database Analysis Assistant
+# DB Assistant — ассистент для работы с базами данных
 
-An example of using the [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) together with Yandex AI Studio to build a multi-agent database analysis assistant. Demonstrates the Handoff pattern: a parent agent delegates tasks to specialized sub-agents.
+Пример использования [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) совместно с Yandex AI Studio для построения мультиагентного ассистента анализа баз данных. Демонстрирует паттерн делегирования (Handoff): главный агент распределяет задачи между специализированными подагентами.
 
-## What the assistant can do
+## Что умеет ассистент
 
-- Convert natural language questions into SQL queries using the loaded schema context
-- Analyze table metadata: columns, types, descriptions, statistics, indexes, foreign keys
-- Recommend SQL optimizations based on index structure and table statistics
-- Build a foreign key dependency tree to visualize relationships between tables
-- Look up database parameter values and return concrete results
-- Execute arbitrary read-only SQL queries and display results live in the SQL console
+- Преобразовывать вопросы на естественном языке в SQL-запросы, зная структуру схемы
+- Анализировать метаданные таблиц: колонки, типы, описания, статистику, индексы, внешние ключи
+- Давать рекомендации по оптимизации SQL на основе индексов и статистики таблиц
+- Строить дерево внешних ключей для анализа связей между таблицами
+- Проверять параметры СУБД и выдавать конкретные значения
+- Выполнять произвольные SQL-запросы в режиме read-only и показывать результаты в SQL-консоли
 
-## Architecture
+## Архитектура
 
 ```
-Browser
+Браузер
   │  WebSocket (Socket.IO v4)
   ▼
-agent (Python / FastAPI + uvicorn, port 8083)
+agent (Python / FastAPI + uvicorn, порт 8083)
   │  OpenAI Agents SDK (Yandex AI Studio / Responses API)
   │
-  ├─ AssistantAgent         ← parent agent, receives user requests
+  ├─ AssistantAgent         ← главный агент, принимает запросы пользователя
   │     │  handoff
-  │     ├─ MetadataAgent    ← schema analysis, indexes, FK via MCP tools
-  │     └─ DataAgent        ← SQL execution via MCP run_wide_sql
+  │     ├─ MetadataAgent    ← анализ схемы, индексов, FK через MCP
+  │     └─ DataAgent        ← выполнение SQL-запросов через MCP
   │
   ▼  SSE (MCP)
-mcp_server (Go, port 8081)
+mcp_server (Go, порт 8081)
   │  HTTP REST
   ▼
-metadata_server (Go, port 8080)
+metadata_server (Go, порт 8080)
   │  SQL
   ▼
-Database (PostgreSQL / MySQL / Oracle)
+СУБД (PostgreSQL / MySQL / Oracle)
 ```
 
-Three microservices are orchestrated via Docker Compose inside an isolated `mcp_network`.
+Три микросервиса запускаются через Docker Compose в изолированной сети `mcp_network`.
 
-### Web UI
+### Веб-интерфейс
 
-A split-panel interface: chat on the left, SQL console on the right.
+Двухпанельный интерфейс: слева — чат с агентом, справа — SQL-консоль.
 
-- Agent-generated SQL queries are mirrored live into the SQL console as they execute
-- Agent progress (LLM calls, tool calls, handoffs) is shown in a collapsible "Reasoning" block
-- The SQL console supports manual query input and configurable preset buttons (`SQL_PRESETS`)
+- Агент автоматически отображает выполняемые SQL-запросы в SQL-консоли в режиме реального времени
+- Прогресс работы агента (LLM-вызовы, tool calls, handoffs) отображается в раскрываемом блоке «Рассуждения»
+- SQL-консоль поддерживает ручной ввод запросов и преднастроенные пресеты (`SQL_PRESETS`)
 
-## Supported databases
+## Поддерживаемые СУБД
 
-| Database | `MDATA_TYPE` value |
-|----------|--------------------|
+| СУБД | Значение `MDATA_TYPE` |
+|------|-----------------------|
 | PostgreSQL / Yandex Managed PostgreSQL | `postgres` |
 | MySQL / Yandex Managed MySQL | `mysql` |
 | Oracle DB | `oracle` |
 
-The service works only with metadata (`pg_catalog`, system catalogs) — no access to table data is required, except for `run_wide_sql` mode (read-only transaction).
+Сервис работает только с метаданными (`pg_catalog`, системные каталоги) — доступ к данным таблиц не требуется, кроме режима `run_wide_sql` (read-only транзакция).
 
-Required privileges:
-- **PostgreSQL** — access to `pg_catalog`, `information_schema`
-- **MySQL** — access to `information_schema`, `performance_schema`
-- **Oracle** — `SELECT` on `all_tables`, `all_tab_columns`, `all_indexes`, `all_ind_columns`, `all_constraints`, `all_cons_columns`, `v$parameter`
+Необходимые привилегии:
+- **PostgreSQL** — доступ к `pg_catalog`, `information_schema`
+- **MySQL** — доступ к `information_schema`, `performance_schema`
+- **Oracle** — `SELECT` на `all_tables`, `all_tab_columns`, `all_indexes`, `all_ind_columns`, `all_constraints`, `all_cons_columns`, `v$parameter`
 
-## Requirements
+## Требования
 
-- Docker and Docker Compose
-- Network access from the host/VM to the database
-- A Yandex Cloud account with access to AI Studio
+- Docker и Docker Compose
+- Сетевой доступ от хоста/VM до СУБД
+- Аккаунт Yandex Cloud с доступом к AI Studio
 
-## Quick start
+## Быстрый старт
 
-### 1. Clone the repository
+### 1. Склонировать репозиторий
 
 ```bash
 git clone <repo-url>
 cd db-assistant
 ```
 
-### 2. Create `.env` — database connection
+### 2. Создать `.env` — подключение к СУБД
 
-Used by `metadata_server` and `mcp_server`.
+Файл используется сервисами `metadata_server` и `mcp_server`.
 
 ```env
-# metadata_server URL inside the docker-compose network (do not change)
+# URL metadata_server внутри docker-compose сети (не менять)
 META_URL=http://web:8080
 
-# Database connection parameters
+# Параметры подключения к СУБД
 MDATA_HOST=rc1b-xxx.mdb.yandexcloud.net
 MDATA_PORT=5432
 MDATA_USER=myuser
@@ -93,168 +93,167 @@ MDATA_PASS=mypassword
 MDATA_TYPE=postgres        # postgres | mysql | oracle
 MDATA_BASE=mydb
 
-# MCP server parameters
+# Параметры MCP-сервера
 MCP_PORT=8081
-MCP_HOST=mcp               # container name (do not change for docker-compose)
-SSE_MODE=true              # true — SSE for agents SDK; false — stdio
+MCP_HOST=mcp               # имя контейнера (не менять при docker-compose)
+SSE_MODE=true              # true — SSE для agents SDK; false — stdio
 
-# Path to CA certificate (for TLS connections to MySQL only)
+# Путь к CA-сертификату (только для TLS-подключения к MySQL)
 # MDATA_CAPATH=/app/root.crt
 ```
 
-**Parameter reference**
+**Описание параметров**
 
-| Parameter | Description | Example |
-|-----------|-------------|---------|
-| `META_URL` | Internal metadata_server URL | `http://web:8080` |
-| `MDATA_HOST` | Database host or FQDN | `rc1b-xxx.mdb.yandexcloud.net` |
-| `MDATA_PORT` | Database port | `5432` (PG), `3306` (MySQL), `1521` (Oracle) |
-| `MDATA_USER` | Database user | `myuser` |
-| `MDATA_PASS` | Password | — |
-| `MDATA_TYPE` | Database type | `postgres` / `mysql` / `oracle` |
-| `MDATA_BASE` | Database name / SID | `mydb` |
-| `MCP_PORT` | MCP server port | `8081` |
-| `MCP_HOST` | MCP server hostname in the docker network | `mcp` |
-| `SSE_MODE` | MCP mode: SSE (`true`) or stdio (`false`) | `true` |
-| `MDATA_CAPATH` | Path to CA certificate inside the container | `/app/root.crt` |
+| Параметр | Описание | Пример |
+|----------|----------|--------|
+| `META_URL` | Внутренний URL metadata_server | `http://web:8080` |
+| `MDATA_HOST` | Хост или FQDN базы данных | `rc1b-xxx.mdb.yandexcloud.net` |
+| `MDATA_PORT` | Порт СУБД | `5432` (PG), `3306` (MySQL), `1521` (Oracle) |
+| `MDATA_USER` | Пользователь БД | `myuser` |
+| `MDATA_PASS` | Пароль | — |
+| `MDATA_TYPE` | Тип СУБД | `postgres` / `mysql` / `oracle` |
+| `MDATA_BASE` | Имя базы данных / SID | `mydb` |
+| `MCP_PORT` | Порт MCP-сервера | `8081` |
+| `MCP_HOST` | Имя хоста MCP-сервера в docker-сети | `mcp` |
+| `SSE_MODE` | Режим MCP: SSE (`true`) или stdio (`false`) | `true` |
+| `MDATA_CAPATH` | Путь к CA-сертификату внутри контейнера | `/app/root.crt` |
 
-> For Yandex Managed MySQL with TLS: download `root.crt` and place it at `/var/opt/root.crt` on the host — it is already mounted in `docker-compose.yaml`.
+> Для Yandex Managed MySQL с TLS: скачайте `root.crt` и положите его в `/var/opt/root.crt` на хосте — он уже смонтирован в `docker-compose.yaml`.
 
-### 3. Create `.env.agent` — agent settings
+### 3. Создать `.env.agent` — настройки агента
 
-Mounted into the `agent` container as `/app/.env`.
+Файл монтируется в контейнер `agent` как `/app/.env`.
 
 ```env
-# Yandex Cloud folder ID
+# Yandex Cloud — идентификатор каталога
 YANDEX__FOLDER_ID=b1gxxxxxxxxxxxxxxxxx
 
-# Yandex AI Studio API key
+# API-ключ Yandex AI Studio
 YANDEX__AUTH=AQVN...
 
-# Yandex AI Studio base URL (do not change)
+# Базовый URL Yandex AI Studio (не менять)
 YANDEX__URL=https://ai.api.cloud.yandex.net/v1
 
-# Model — URI in the format gpt://<folder_id>/<model>/latest
+# Модель — URI формата gpt://<folder_id>/<model>/latest
 YANDEX__MODEL=gpt://b1gxxxxxxxxxxxxxxxxx/yandexgpt/latest
 
-# MCP server URL in the docker-compose network (do not change)
+# URL MCP-сервера в docker-compose сети (не менять)
 YANDEX__GET_INFO_MCP_URL=http://mcp:8081/sse
 
-# Default database schema — loaded at startup and injected into agent context
+# Схема БД по умолчанию — агент загрузит её структуру при старте
 YANDEX__METADATA_SCHEMA=public
 
-# Web interface port
+# Порт веб-интерфейса
 YANDEX__PORT=8083
 
-# AI API response timeout (seconds)
+# Таймаут ожидания ответа от AI API (секунды)
 YANDEX__WAIT_TIMEOUT=45
 
-# Max agent steps (tool calls + handoffs) per user message
+# Максимальное количество шагов агента за один запрос (tool calls + handoffs)
 YANDEX__MAX_TURNS=25
 
-# Log file name inside the container
+# Имя лог-файла внутри контейнера
 YANDEX__LOG_FILE_NAME=agent_main.log
 
-# System prompts for each agent
-YANDEX__ASSISTANT_INSTRUCTION=<system prompt for AssistantAgent>
-YANDEX__METADATA_INSTRUCTION=<system prompt for MetadataAgent>
-YANDEX__DATA_INSTRUCTION=<system prompt for DataAgent>
+# Системные инструкции агентов
+YANDEX__ASSISTANT_INSTRUCTION=<промпт для AssistantAgent>
+YANDEX__METADATA_INSTRUCTION=<промпт для MetadataAgent>
+YANDEX__DATA_INSTRUCTION=<промпт для DataAgent>
 
-# Session history sliding window (number of SDK items sent to the model per turn)
-# 0 = no limit; ~5-10 items per visible conversation turn,
-# SESSION_MAX_HISTORY=30 ≈ 4-6 past turns retained in context
+# Скользящее окно истории сессии (количество SDK-элементов, передаваемых в контекст)
+# 0 = без ограничений; ~5-10 элементов на один видимый ход, SESSION_MAX_HISTORY=30 ≈ 4-6 ходов
 YANDEX__SESSION_MAX_HISTORY=0
 
-# Enable verbose debug logging (OPENAI_LOG=debug) to container stdout
-# Use only for troubleshooting — generates large log volume
+# Включить подробное логирование (OPENAI_LOG=debug) в stdout контейнера
+# Только для отладки — генерирует большой объём логов
 YANDEX__DEBUG=false
 
-# Preset SQL queries shown as buttons in the SQL console (JSON array)
-YANDEX__SQL_PRESETS=[{"description":"Table list","sql":"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"},{"description":"Table sizes","sql":"SELECT relname, pg_size_pretty(pg_total_relation_size(oid)) FROM pg_class WHERE relkind = 'r' ORDER BY pg_total_relation_size(oid) DESC LIMIT 20"}]
+# Преднастроенные SQL-запросы для SQL-консоли (JSON-массив)
+YANDEX__SQL_PRESETS=[{"description":"Список таблиц","sql":"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name"},{"description":"Размер таблиц","sql":"SELECT relname, pg_size_pretty(pg_total_relation_size(oid)) FROM pg_class WHERE relkind = 'r' ORDER BY pg_total_relation_size(oid) DESC LIMIT 20"}]
 ```
 
-**Parameter reference**
+**Описание параметров**
 
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `YANDEX__FOLDER_ID` | — | Yandex Cloud folder ID (from the Console "Overview" page) |
-| `YANDEX__AUTH` | — | API key or IAM token for Yandex AI Studio |
-| `YANDEX__URL` | — | Yandex AI Studio endpoint (OpenAI-compatible) |
-| `YANDEX__MODEL` | — | Model URI: `gpt://<folder_id>/<model>/latest` |
-| `YANDEX__GET_INFO_MCP_URL` | — | SSE endpoint of the MCP server |
-| `YANDEX__METADATA_SCHEMA` | `public` | Schema loaded at startup and added to agent context |
-| `YANDEX__PORT` | — | Web application port |
-| `YANDEX__WAIT_TIMEOUT` | — | AI API response timeout in seconds |
-| `YANDEX__MAX_TURNS` | `25` | Max agent steps (tool calls + handoffs) per request |
-| `YANDEX__LOG_FILE_NAME` | — | Log file path inside the container |
-| `YANDEX__ASSISTANT_INSTRUCTION` | — | System prompt for the parent AssistantAgent |
-| `YANDEX__METADATA_INSTRUCTION` | — | System prompt for MetadataAgent |
-| `YANDEX__DATA_INSTRUCTION` | — | System prompt for DataAgent |
-| `YANDEX__SESSION_MAX_HISTORY` | `0` | Session history window: SDK items in context; `0` = unlimited |
-| `YANDEX__DEBUG` | `false` | `true` enables `OPENAI_LOG=debug` and httpx tracing to stdout |
-| `YANDEX__SQL_PRESETS` | `[]` | JSON array `[{"description":"...","sql":"..."}]` for SQL console buttons |
+| Параметр | По умолчанию | Описание |
+|----------|-------------|----------|
+| `YANDEX__FOLDER_ID` | — | ID каталога Yandex Cloud (раздел «Обзор» консоли) |
+| `YANDEX__AUTH` | — | API-ключ или IAM-токен Yandex AI Studio |
+| `YANDEX__URL` | — | Endpoint Yandex AI Studio (OpenAI-совместимый) |
+| `YANDEX__MODEL` | — | URI модели в формате `gpt://<folder_id>/<model>/latest` |
+| `YANDEX__GET_INFO_MCP_URL` | — | SSE-эндпоинт MCP-сервера |
+| `YANDEX__METADATA_SCHEMA` | `public` | Схема, которую агент читает при старте и добавляет в контекст |
+| `YANDEX__PORT` | — | Порт веб-приложения |
+| `YANDEX__WAIT_TIMEOUT` | — | Таймаут (сек.) ожидания ответа от AI API |
+| `YANDEX__MAX_TURNS` | `25` | Лимит шагов агента (tool calls + handoffs) за один запрос |
+| `YANDEX__LOG_FILE_NAME` | — | Путь к лог-файлу внутри контейнера |
+| `YANDEX__ASSISTANT_INSTRUCTION` | — | Системный промпт главного агента |
+| `YANDEX__METADATA_INSTRUCTION` | — | Системный промпт MetadataAgent |
+| `YANDEX__DATA_INSTRUCTION` | — | Системный промпт DataAgent |
+| `YANDEX__SESSION_MAX_HISTORY` | `0` | Скользящее окно истории: кол-во SDK-элементов в контексте; `0` — без ограничений |
+| `YANDEX__DEBUG` | `false` | `true` — включает `OPENAI_LOG=debug` и httpx-трассировку в stdout |
+| `YANDEX__SQL_PRESETS` | `[]` | JSON-массив `[{"description":"...","sql":"..."}]` для кнопок SQL-консоли |
 
-> Settings use Pydantic `BaseSettings` with `__` as the nested delimiter — all under the `YANDEX__*` prefix. See `agent/utils/config.py`.
+> Настройки используют Pydantic `BaseSettings` с вложенным разделителем `__` — всё в разделе `YANDEX__*`. Подробнее: `agent/utils/config.py`.
 
 #### SESSION_MAX_HISTORY vs MAX_TURNS
 
-These settings are often confused — they control different things:
+Эти настройки часто путают — они управляют разными вещами:
 
-| Parameter | Controls |
-|-----------|----------|
-| `MAX_TURNS` | Number of agent steps (LLM calls + tool calls) allowed within a **single** user message |
-| `SESSION_MAX_HISTORY` | Number of SDK items from **past turns** sent to the model as context on each request |
+| Параметр | Что ограничивает |
+|----------|-----------------|
+| `MAX_TURNS` | Количество шагов агента (LLM-вызовы + tool calls) в рамках **одного** пользовательского сообщения |
+| `SESSION_MAX_HISTORY` | Количество SDK-элементов из **прошлых** ходов, передаваемых в контекст при следующем запросе |
 
-Each visible conversation turn produces roughly 5–10 SDK items (user message, reasoning block, tool call, tool result, assistant reply). With `SESSION_MAX_HISTORY=30`, approximately 4–6 past turns are retained in context.
+Каждый видимый ход диалога порождает ~5–10 SDK-элементов (сообщение пользователя, reasoning block, tool call, tool result, ответ ассистента). При `SESSION_MAX_HISTORY=30` в контексте остаётся ~4–6 прошлых ходов.
 
-### 4. Build and run
+### 4. Собрать и запустить
 
 ```bash
-# Build images
+# Собрать образы
 docker-compose build
 
-# Start all services
+# Запустить все сервисы
 docker-compose up -d
 
-# Check status
+# Проверить состояние
 docker-compose ps
 
-# Follow agent logs
+# Следить за логами агента
 docker-compose logs -f agent
 ```
 
-On startup, `agent` automatically reads the table list from the `YANDEX__METADATA_SCHEMA` schema via MCP and writes the full schema description (columns, indexes, FK relationships) to `AGENT.md`. This file is injected into the system prompt of MetadataAgent and DataAgent — the agents know the schema and write correct SQL without asking the user for clarification.
+При старте `agent` автоматически считывает список таблиц из схемы `YANDEX__METADATA_SCHEMA` через MCP и записывает полное описание схемы (колонки, индексы, FK) в `AGENT.md`. Этот файл подставляется в системный промпт MetadataAgent и DataAgent — агент знает структуру и пишет SQL без дополнительных вопросов пользователю.
 
-### 5. Open the web interface
+### 5. Открыть веб-интерфейс
 
 ```
 http://localhost:8083/
 ```
 
-## Example queries
+## Примеры запросов
 
-### SQL from a description
-
-```
-Write a query to get all orders for a user over the last month
-```
-
-The agent uses the schema from `AGENT.md` and produces ready-to-run SQL with correct table names and schema qualifiers.
-
-### Table structure and indexes
+### SQL по описанию
 
 ```
-Show the columns of the orders table
+Напиши запрос для получения всех заказов пользователя за последний месяц
+```
+
+Агент использует схему из `AGENT.md` и предложит готовый SQL с правильными именами таблиц и квалификатором схемы.
+
+### Структура таблицы и индексы
+
+```
+Покажи список полей таблицы orders
 ```
 
 ```
-What indexes exist on the account table?
+Какие индексы есть на таблице account?
 ```
 
-### SQL optimization
+### Оптимизация SQL
 
 ```
-Help me optimize this query:
+Помоги оптимизировать запрос:
 
 SELECT s1.c, COUNT(1)
 FROM public.sbtest s1
@@ -262,52 +261,52 @@ JOIN public.sbtest7 s7 USING (id)
 GROUP BY s1.c
 ```
 
-The agent checks indexes on `id` and `c`, looks at table statistics, and suggests concrete changes.
+Агент проверит индексы на `id` и `c`, посмотрит статистику и предложит конкретные изменения.
 
-### Foreign key tree
-
-```
-Show the foreign key dependency tree for the orders table at depth 2
-```
-
-### Database parameters
+### Связи между таблицами
 
 ```
-What is the current value of work_mem?
+Покажи дерево внешних ключей таблицы orders глубиной 2
 ```
 
-## MCP tools
+### Параметры СУБД
 
-| Tool | Agent | Parameters | Description |
-|------|-------|------------|-------------|
-| `get_metadata` | MetadataAgent | `schemaName`, `tableName` | Columns, types, comments |
-| `get_table_list` | MetadataAgent | `schemaName`, `tableName` (wildcard) | List of tables |
-| `get_statistics` | MetadataAgent | `schemaName`, `tableName` | Table statistics |
-| `get_indexes` | MetadataAgent | `schemaName`, `tableName` | Table indexes |
-| `get_db_parameters` | MetadataAgent | `parameterName` | Database parameter value |
-| `get_relationships` | MetadataAgent | `schemaName`, `tableName`, `depth` (opt.) | FK dependency tree |
-| `run_wide_sql` | DataAgent | `sql` | Read-only SQL query |
+```
+Какое текущее значение параметра work_mem?
+```
 
-## metadata_server REST API
+## MCP-инструменты
 
-Available on port `8080`. Used automatically by the MCP server; direct calls are useful for debugging.
+| Инструмент | Агент | Параметры | Описание |
+|------------|-------|-----------|----------|
+| `get_metadata` | MetadataAgent | `schemaName`, `tableName` | Колонки, типы, комментарии |
+| `get_table_list` | MetadataAgent | `schemaName`, `tableName` (маска) | Список таблиц |
+| `get_statistics` | MetadataAgent | `schemaName`, `tableName` | Статистика таблицы |
+| `get_indexes` | MetadataAgent | `schemaName`, `tableName` | Индексы |
+| `get_db_parameters` | MetadataAgent | `parameterName` | Параметр СУБД |
+| `get_relationships` | MetadataAgent | `schemaName`, `tableName`, `depth` (опц.) | Дерево FK-зависимостей |
+| `run_wide_sql` | DataAgent | `sql` | Read-only SQL-запрос |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/healthz` | Health check |
-| `POST` | `/connection/open` | Open connection (form: `dbtype`, `dbhost`, `dbport`, `username`, `password`, `database`, `capath`) |
-| `POST` | `/connection/close` | Close connection |
-| `GET` | `/connection/status` | Connection status |
-| `GET` | `/metadata/{schema}/{table}` | Table metadata (columns, types, descriptions) |
-| `GET` | `/tables/{schema}/{table}` | Table list by wildcard (`%`, `_` supported) |
-| `GET` | `/stats/{schema}/{table}` | Table statistics (row count, analyze date) |
-| `GET` | `/indexes/{schema}/{table}` | Table indexes |
-| `GET` | `/parameter/{name}` | Database parameter value |
-| `GET` | `/relationships/{schema}/{table}?depth=N` | FK dependency tree (depth 1–5, default 5) |
-| `POST` | `/sql` | Execute SQL in read-only mode (form: `sql`) |
+## REST API metadata_server
 
-## Yandex Cloud services used
+Сервис доступен на порту `8080`. MCP-сервер использует его автоматически; прямые запросы полезны для отладки.
 
-- **Yandex AI Studio** — YandexGPT models, Responses API (OpenAI-compatible)
-- **Yandex Managed Service for PostgreSQL / MySQL** — target databases (optional)
-- **Yandex Cloud Compute** — VM for running docker-compose (optional)
+| Метод | Путь | Описание |
+|-------|------|----------|
+| `GET` | `/healthz` | Проверка работоспособности |
+| `POST` | `/connection/open` | Открыть соединение (form: `dbtype`, `dbhost`, `dbport`, `username`, `password`, `database`, `capath`) |
+| `POST` | `/connection/close` | Закрыть соединение |
+| `GET` | `/connection/status` | Статус соединения |
+| `GET` | `/metadata/{schema}/{table}` | Метаданные таблицы (колонки, типы, описания) |
+| `GET` | `/tables/{schema}/{table}` | Список таблиц по маске (`%`, `_` поддерживаются) |
+| `GET` | `/stats/{schema}/{table}` | Статистика таблицы (число строк, дата анализа) |
+| `GET` | `/indexes/{schema}/{table}` | Индексы таблицы |
+| `GET` | `/parameter/{name}` | Значение параметра СУБД |
+| `GET` | `/relationships/{schema}/{table}?depth=N` | Дерево FK-зависимостей (глубина 1–5, по умолчанию 5) |
+| `POST` | `/sql` | Выполнить SQL в режиме read-only (form: `sql`) |
+
+## Используемые сервисы Yandex Cloud
+
+- **Yandex AI Studio** — модели YandexGPT, Responses API (OpenAI-совместимый)
+- **Yandex Managed Service for PostgreSQL / MySQL** — анализируемые СУБД (опционально)
+- **Yandex Cloud Compute** — VM для запуска docker-compose (опционально)
