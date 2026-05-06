@@ -1,4 +1,4 @@
-**English** | [Русский](README.md)
+**English** | [Русский](Readme.md)
 
 # DB Assistant — Database Analysis Assistant
 
