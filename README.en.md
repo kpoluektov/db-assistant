@@ -74,6 +74,33 @@ What is the current value of work_mem?
 
 ## Architecture
 
+### How a single request is handled
+
+Let's walk through what happens between the user pressing Enter and the answer appearing in the chat. Question: **"How many passengers flew out of Moscow in July 2026?"**
+
+**1. Application startup (one-time).** The `agent` container connects to the configured database schema via the MCP server, reads the list of tables, their columns, indexes, and foreign keys, and writes everything to a file called `AGENT.md`. On every subsequent request this file is injected into the system prompt of the agents — the model "knows" the database structure and writes correct SQL without asking the user to clarify anything. **Only the schema structure is sent to the LLM; the actual rows of the tables are never sent to the model** — except for the results of specific SQL queries the agent ran to answer your question.
+
+**2. Routing.** The parent `AssistantAgent` looks at the question and decides who to delegate it to: questions about structure, indexes, or optimization go to `MetadataAgent`, questions about the actual data go to `DataAgent`. The delegation uses the handoff pattern from the OpenAI Agents SDK. In our example the question is about data → it's handed off to `DataAgent`.
+
+**3. SQL generation.** `DataAgent` looks at the schema in `AGENT.md`, figures out that it needs to join `boardings`, `flights`, and `airports`, and produces this SQL:
+
+```sql
+SELECT COUNT(*) AS passengers
+FROM demo.boardings b
+JOIN demo.flights   f ON f.id = b.flight
+JOIN demo.airports  a ON a.id = f.src
+WHERE a.city = 'Moscow'
+  AND b.flight_date BETWEEN '2026-07-01' AND '2026-07-31';
+```
+
+**4. Calling a tool via MCP.** To execute the SQL, the agent does not talk to the database directly — it calls an MCP tool, `run_wide_sql(sql=...)`. This is **MCP** (Model Context Protocol — an open standard from Anthropic for exposing tools to LLM agents): the MCP server exposes a catalog of 7 tools (`get_metadata`, `get_indexes`, `get_relationships`, `run_wide_sql`, etc.), and the agent picks the one it needs during reasoning and calls it like a regular function. Putting the tools into a separate service makes them reusable: the same MCP server can be plugged into Claude Desktop, Cursor, or any other MCP-compatible client without changing a single line in the tools themselves.
+
+**5. Execution.** The MCP server forwards the SQL to `metadata_server`, which opens a `READ ONLY` transaction in the database, runs the query, and returns the result. Read-only is not an application setting the agent could bypass — the transaction is started with the `READ ONLY` isolation level, so any `INSERT` / `UPDATE` / `DELETE` inside it would fail at the database level.
+
+**6. The answer.** `DataAgent` receives the row with the count, phrases the answer in natural language ("in July 2026 there were N boardings out of Moscow"), and returns it to the user. In parallel the UI shows the executed SQL and the result rows in the SQL console on the right — the user sees **how exactly** the agent arrived at the answer and can edit the SQL by hand if needed.
+
+### Components and protocols
+
 ```
 Browser
   │  WebSocket (Socket.IO v4)
