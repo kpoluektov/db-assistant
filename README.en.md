@@ -2,7 +2,7 @@
 
 # DB Assistant — Database Analysis Assistant
 
-**What this demo shows.** A web application that lets you talk to a database in plain natural language. The user asks a question ("how many passengers flew out of Moscow in July?") — the app writes the SQL itself, runs it, and returns the answer. The demo shows how Yandex AI Studio models can be used to build an assistant for analysts, developers, and DBAs without giving them direct access to the database or requiring them to know SQL.
+**What is DB Assistant.** A web application that lets you talk to a database in plain natural language. The user asks a question ("how many passengers flew out of Moscow in July?") — the app writes the SQL itself, runs it, and returns the answer. It's a tool for analysts, developers, and DBAs that gives them the ability to work with databases without direct access and without needing to know SQL.
 
 **How it works.** On startup, the application reads the structure of the selected schema — tables, columns, relationships, indexes — and injects it into the system prompt. As a result, the model already "knows" the database and produces correct SQL without asking the user clarifying questions. Three agents work together inside: a parent router agent receives the question and delegates it either to the metadata agent (schema, indexes, statistics, optimization) or to the data agent (SQL generation and execution). All database calls go through an MCP server in read-only mode — data cannot be modified or deleted. The UI is split: the chat with the assistant is on the left, and an SQL console on the right shows in real time which queries the agent built and executed.
 
