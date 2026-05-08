@@ -2,7 +2,22 @@
 
 # DB Assistant — Database Analysis Assistant
 
-An example of using the [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) together with Yandex AI Studio to build a multi-agent database analysis assistant. Demonstrates the Handoff pattern: a parent agent delegates tasks to specialized sub-agents.
+**What is DB Assistant.** A web application that lets you talk to a database in plain natural language. The user asks a question ("how many passengers flew out of Moscow in July?") — the app writes the SQL itself, runs it, and returns the answer. It's a tool for analysts, developers, and DBAs that gives them the ability to work with databases without direct access and without needing to know SQL.
+
+**How it works.** On startup, the application reads the structure of the selected schema — tables, columns, relationships, indexes — and injects it into the system prompt. As a result, the model already "knows" the database and produces correct SQL without asking the user clarifying questions. Three agents work together inside: a parent router agent receives the question and delegates it either to the metadata agent (schema, indexes, statistics, optimization) or to the data agent (SQL generation and execution). All database calls go through an MCP server in read-only mode — data cannot be modified or deleted. The UI is split: the chat with the assistant is on the left, and an SQL console on the right shows in real time which queries the agent built and executed.
+
+Under the hood: the [OpenAI Agents SDK](https://github.com/openai/openai-agents-python) on top of Yandex AI Studio (Handoff pattern between agents) and three microservices orchestrated by Docker Compose.
+
+![DB Assistant UI](docs/screenshot01.png)
+
+*Left — the chat with the assistant in natural language; right — the SQL console with preset buttons and the result of the last query. The "Reasoning" block can be expanded to see each step the agent took: which MCP tools were called and in what order.*
+
+## Business value
+
+- **Self-service for non-technical users.** Analysts, product managers, and other business users get answers from the database in plain language — no ticket to a developer, no SQL knowledge required.
+- **Faster onboarding to an unfamiliar schema.** A new team member or contractor asks "how are orders modelled here?" and the agent finds the relevant tables, relationships, and describes them.
+- **Schema audit and optimization without a DBA.** Checking for missing indexes, stale statistics, the foreign-key dependency tree, or getting a query optimization hint — all directly from the chat.
+- **Safe by default.** All database calls are read-only, every generated SQL is visible in the console, and only the schema structure is sent to the model — your data stays in your perimeter.
 
 ## What the assistant can do
 
@@ -13,7 +28,78 @@ An example of using the [OpenAI Agents SDK](https://github.com/openai/openai-age
 - Look up database parameter values and return concrete results
 - Execute arbitrary read-only SQL queries and display results live in the SQL console
 
+## Example queries
+
+A few common scenarios. The full step-by-step demo script for the `demo` schema (air travel) — from simple lookups to multi-table JOINs and optimization — lives in [`examples/README.md`](examples/README.md).
+
+**SQL from a description**
+
+```
+Write a query to get all orders for a user over the last month
+```
+
+The agent uses the schema from `AGENT.md` and produces ready-to-run SQL with correct table names and schema qualifiers.
+
+**Table structure and indexes**
+
+```
+Show the columns of the orders table
+What indexes exist on the account table?
+```
+
+**SQL optimization**
+
+```
+Help me optimize this query:
+
+SELECT u.id, u.email, COUNT(o.id) AS orders_count
+FROM public.users u
+JOIN public.orders o ON o.user_id = u.id
+GROUP BY u.id, u.email
+```
+
+The agent checks indexes on `users.id` and `orders.user_id`, looks at table statistics, and suggests concrete changes.
+
+**Foreign key tree**
+
+```
+Show the foreign key dependency tree for the orders table at depth 2
+```
+
+**Database parameters**
+
+```
+What is the current value of work_mem?
+```
+
 ## Architecture
+
+### How a single request is handled
+
+Let's walk through what happens between the user pressing Enter and the answer appearing in the chat. Question: **"How many passengers flew out of Moscow in July 2026?"**
+
+**1. Application startup (one-time).** The `agent` container connects to the configured database schema via the MCP server, reads the list of tables, their columns, indexes, and foreign keys, and writes everything to a file called `AGENT.md`. On every subsequent request this file is injected into the system prompt of the agents — the model "knows" the database structure and writes correct SQL without asking the user to clarify anything. **Only the schema structure is sent to the LLM; the actual rows of the tables are never sent to the model** — except for the results of specific SQL queries the agent ran to answer your question.
+
+**2. Routing.** The parent `AssistantAgent` looks at the question and decides who to delegate it to: questions about structure, indexes, or optimization go to `MetadataAgent`, questions about the actual data go to `DataAgent`. The delegation uses the handoff pattern from the OpenAI Agents SDK. In our example the question is about data → it's handed off to `DataAgent`.
+
+**3. SQL generation.** `DataAgent` looks at the schema in `AGENT.md`, figures out that it needs to join `boardings`, `flights`, and `airports`, and produces this SQL:
+
+```sql
+SELECT COUNT(*) AS passengers
+FROM demo.boardings b
+JOIN demo.flights   f ON f.id = b.flight
+JOIN demo.airports  a ON a.id = f.src
+WHERE a.city = 'Moscow'
+  AND b.flight_date BETWEEN '2026-07-01' AND '2026-07-31';
+```
+
+**4. Calling a tool via MCP.** To execute the SQL, the agent does not talk to the database directly — it calls an MCP tool, `run_wide_sql(sql=...)`. This is **MCP** (Model Context Protocol — an open standard from Anthropic for exposing tools to LLM agents): the MCP server exposes a catalog of 7 tools (`get_metadata`, `get_indexes`, `get_relationships`, `run_wide_sql`, etc.), and the agent picks the one it needs during reasoning and calls it like a regular function. Putting the tools into a separate service makes them reusable: the same MCP server can be plugged into Claude Desktop, Cursor, or any other MCP-compatible client without changing a single line in the tools themselves.
+
+**5. Execution.** The MCP server forwards the SQL to `metadata_server`, which opens a `READ ONLY` transaction in the database, runs the query, and returns the result. Read-only is not an application setting the agent could bypass — the transaction is started with the `READ ONLY` isolation level, so any `INSERT` / `UPDATE` / `DELETE` inside it would fail at the database level.
+
+**6. The answer.** `DataAgent` receives the row with the count, phrases the answer in natural language ("in July 2026 there were N boardings out of Moscow"), and returns it to the user. In parallel the UI shows the executed SQL and the result rows in the SQL console on the right — the user sees **how exactly** the agent arrived at the answer and can edit the SQL by hand if needed.
+
+### Components and protocols
 
 ```
 Browser
@@ -37,17 +123,17 @@ metadata_server (Go, port 8080)
 Database (PostgreSQL / MySQL / Oracle)
 ```
 
-Three microservices are orchestrated via Docker Compose inside an isolated `mcp_network`.
+Three microservices are orchestrated via Docker Compose inside an isolated `mcp_network`. The web UI is served by the `agent` container (FastAPI + Socket.IO); the SQL console supports manual queries and configurable preset buttons — see the `YANDEX__SQL_PRESETS` setting in the Quick start section.
 
-### Web UI
+## Requirements
 
-A split-panel interface: chat on the left, SQL console on the right.
+**Infrastructure**
 
-- Agent-generated SQL queries are mirrored live into the SQL console as they execute
-- Agent progress (LLM calls, tool calls, handoffs) is shown in a collapsible "Reasoning" block
-- The SQL console supports manual query input and configurable preset buttons (`SQL_PRESETS`)
+- Docker and Docker Compose
+- Network access from the host/VM to the database
+- A Yandex Cloud account with access to AI Studio
 
-## Supported databases
+**Supported databases**
 
 | Database | `MDATA_TYPE` value |
 |----------|--------------------|
@@ -57,18 +143,15 @@ A split-panel interface: chat on the left, SQL console on the right.
 
 The service works only with metadata (`pg_catalog`, system catalogs) — no access to table data is required, except for `run_wide_sql` mode (read-only transaction).
 
-Required privileges:
+**Required privileges**
+
 - **PostgreSQL** — access to `pg_catalog`, `information_schema`
 - **MySQL** — access to `information_schema`, `performance_schema`
 - **Oracle** — `SELECT` on `all_tables`, `all_tab_columns`, `all_indexes`, `all_ind_columns`, `all_constraints`, `all_cons_columns`, `v$parameter`
 
-## Requirements
-
-- Docker and Docker Compose
-- Network access from the host/VM to the database
-- A Yandex Cloud account with access to AI Studio
-
 ## Quick start
+
+> **No database of your own for the demo?** Use the ready-made schema in the `examples/` folder — PostgreSQL, schema `demo` modelling air travel (10 airports, ~38,000 boardings for July 2026). It comes with a curated list of demo questions covering different agent scenarios. Setup instructions and the demo script are in [`examples/README.md`](examples/README.md).
 
 ### 1. Clone the repository
 
@@ -196,17 +279,6 @@ YANDEX__SQL_PRESETS=[{"description":"Table list","sql":"SELECT table_name FROM i
 
 > Settings use Pydantic `BaseSettings` with `__` as the nested delimiter — all under the `YANDEX__*` prefix. See `agent/utils/config.py`.
 
-#### SESSION_MAX_HISTORY vs MAX_TURNS
-
-These settings are often confused — they control different things:
-
-| Parameter | Controls |
-|-----------|----------|
-| `MAX_TURNS` | Number of agent steps (LLM calls + tool calls) allowed within a **single** user message |
-| `SESSION_MAX_HISTORY` | Number of SDK items from **past turns** sent to the model as context on each request |
-
-Each visible conversation turn produces roughly 5–10 SDK items (user message, reasoning block, tool call, tool result, assistant reply). With `SESSION_MAX_HISTORY=30`, approximately 4–6 past turns are retained in context.
-
 ### 4. Build and run
 
 ```bash
@@ -231,50 +303,16 @@ On startup, `agent` automatically reads the table list from the `YANDEX__METADAT
 http://localhost:8083/
 ```
 
-## Example queries
+### Note: `SESSION_MAX_HISTORY` vs `MAX_TURNS`
 
-### SQL from a description
+Two agent settings that are often confused — they control different things:
 
-```
-Write a query to get all orders for a user over the last month
-```
+| Parameter | Controls |
+|-----------|----------|
+| `MAX_TURNS` | Number of agent steps (LLM calls + tool calls) allowed within a **single** user message |
+| `SESSION_MAX_HISTORY` | Number of SDK items from **past turns** sent to the model as context on each request |
 
-The agent uses the schema from `AGENT.md` and produces ready-to-run SQL with correct table names and schema qualifiers.
-
-### Table structure and indexes
-
-```
-Show the columns of the orders table
-```
-
-```
-What indexes exist on the account table?
-```
-
-### SQL optimization
-
-```
-Help me optimize this query:
-
-SELECT s1.c, COUNT(1)
-FROM public.sbtest s1
-JOIN public.sbtest7 s7 USING (id)
-GROUP BY s1.c
-```
-
-The agent checks indexes on `id` and `c`, looks at table statistics, and suggests concrete changes.
-
-### Foreign key tree
-
-```
-Show the foreign key dependency tree for the orders table at depth 2
-```
-
-### Database parameters
-
-```
-What is the current value of work_mem?
-```
+Each visible conversation turn produces roughly 5–10 SDK items (user message, reasoning block, tool call, tool result, assistant reply). With `SESSION_MAX_HISTORY=30`, approximately 4–6 past turns are retained in context.
 
 ## MCP tools
 
