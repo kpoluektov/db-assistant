@@ -99,7 +99,7 @@ async def conn(sid, msg):
 
 @sio.on('client_message')
 async def receive_message(sid, data):
-    await sio.emit('server_message', data)
+    await sio.emit('server_message', data, to=sid)
     task = asyncio.create_task(_handle_message(sid, data))
     _tasks.add(task)
     task.add_done_callback(_tasks.discard)
@@ -113,7 +113,7 @@ async def _handle_message(sid: str, data: dict) -> None:
     except Exception as e:
         _log.error(f"Agent error: {e}\n{traceback.format_exc()}")
         resp = f"Error: {e}"
-    await sio.emit('server_message', {'nickname': 'assistant', 'message': resp})
+    await sio.emit('server_message', {'nickname': 'assistant', 'message': resp}, to=sid)
 
 
 if __name__ == '__main__':
