@@ -9,6 +9,7 @@ See https://yandex.cloud/ru/docs/monium/traces/instrumentation/manual
 from __future__ import annotations
 
 import atexit
+import json
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -22,6 +23,8 @@ from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.trace import SpanKind, Status, StatusCode
 
 _log = logging.getLogger("db_assistant")
+
+_MAX_ATTR_CHARS = 30_000
 
 
 def setup_monium_tracing(
@@ -93,6 +96,56 @@ def _span_name(data: Any) -> str:
     return t
 
 
+def _truncate(s: str) -> str:
+    if len(s) <= _MAX_ATTR_CHARS:
+        return s
+    return s[:_MAX_ATTR_CHARS] + f"…[truncated {len(s) - _MAX_ATTR_CHARS} chars]"
+
+
+def _to_jsonable(obj: Any) -> Any:
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if hasattr(obj, "model_dump"):
+        try:
+            return obj.model_dump(exclude_none=True)
+        except Exception:
+            pass
+    if isinstance(obj, dict):
+        return {k: _to_jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_jsonable(x) for x in obj]
+    return str(obj)
+
+
+def _dump(obj: Any) -> str:
+    try:
+        return json.dumps(_to_jsonable(obj), ensure_ascii=False, default=str)
+    except Exception:
+        return str(obj)
+
+
+def _set_usage_attrs(attrs: dict[str, Any], usage: Any) -> None:
+    """Flatten a usage dict / ResponseUsage pydantic model into numeric attrs."""
+    if usage is None:
+        return
+    if hasattr(usage, "model_dump"):
+        try:
+            usage = usage.model_dump(exclude_none=True)
+        except Exception:
+            return
+    if not isinstance(usage, dict):
+        return
+    for k, v in usage.items():
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            attrs[f"agents.usage.{k}"] = v
+        elif isinstance(v, dict):
+            for kk, vv in v.items():
+                if isinstance(vv, (int, float)) and not isinstance(vv, bool):
+                    attrs[f"agents.usage.{k}.{kk}"] = vv
+
+
 def _span_attrs(data: Any) -> dict[str, Any]:
     if data is None:
         return {}
@@ -107,11 +160,46 @@ def _span_attrs(data: Any) -> dict[str, Any]:
         seq = getattr(data, key, None)
         if seq:
             attrs[f"agents.{key}"] = [str(x) for x in seq]
-    usage = getattr(data, "usage", None)
-    if isinstance(usage, dict):
-        for k, v in usage.items():
-            if isinstance(v, (int, float)):
-                attrs[f"agents.usage.{k}"] = v
+
+    if data.type == "response":
+        inp = getattr(data, "input", None)
+        if inp is not None:
+            attrs["agents.llm.input"] = _truncate(_dump(inp))
+        resp = getattr(data, "response", None)
+        if resp is not None:
+            out = getattr(resp, "output", None)
+            if out is not None:
+                attrs["agents.llm.output"] = _truncate(_dump(out))
+            resp_id = getattr(resp, "id", None)
+            if resp_id:
+                attrs["agents.llm.response_id"] = str(resp_id)
+            _set_usage_attrs(attrs, getattr(resp, "usage", None))
+
+    elif data.type == "generation":
+        if getattr(data, "input", None) is not None:
+            attrs["agents.llm.input"] = _truncate(_dump(data.input))
+        if getattr(data, "output", None) is not None:
+            attrs["agents.llm.output"] = _truncate(_dump(data.output))
+        _set_usage_attrs(attrs, getattr(data, "usage", None))
+
+    elif data.type == "function":
+        fin = getattr(data, "input", None)
+        if fin is not None:
+            attrs["agents.tool.input"] = _truncate(
+                fin if isinstance(fin, str) else _dump(fin)
+            )
+        fout = getattr(data, "output", None)
+        if fout is not None:
+            attrs["agents.tool.output"] = _truncate(
+                fout if isinstance(fout, str) else _dump(fout)
+            )
+
+    else:
+        usage = getattr(data, "usage", None)
+        if isinstance(usage, dict):
+            for k, v in usage.items():
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    attrs[f"agents.usage.{k}"] = v
     return attrs
 
 
