@@ -21,6 +21,10 @@ class YandexSettings(BaseModel):
     SESSION_MAX_HISTORY: int = 0
     SQL_PRESETS: list[dict[str, str]] = []
     DEBUG: bool = False
+    MONIUM_ENABLED: bool = False
+    MONIUM_ENDPOINT: str = "ingest.monium.yandex.cloud:443"
+    MONIUM_API_KEY: str = ""
+    MONIUM_SERVICE_NAME: str = "db-assistant"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(

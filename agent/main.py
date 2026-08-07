@@ -17,6 +17,7 @@ from agents.mcp import MCPServerSse
 from utils.config import Settings
 from utils.logger import yLogger
 from utils.hooks import ExampleHooks
+from utils.tracing import setup_monium_tracing
 from agent import YandexAssistant, initialize_schema
 
 _log = logging.getLogger("db_assistant")
@@ -35,6 +36,14 @@ if settings.yandex.DEBUG:
         _lgr.setLevel(logging.DEBUG)
         if not _lgr.handlers:
             _lgr.addHandler(_debug_handler)
+
+if settings.yandex.MONIUM_ENABLED:
+    setup_monium_tracing(
+        endpoint=settings.yandex.MONIUM_ENDPOINT,
+        api_key=settings.yandex.MONIUM_API_KEY or settings.yandex.AUTH,
+        folder_id=settings.yandex.FOLDER_ID,
+        service_name=settings.yandex.MONIUM_SERVICE_NAME,
+    )
 
 sio = socketio.AsyncServer(async_mode='asgi', cors_allowed_origins='*')
 
